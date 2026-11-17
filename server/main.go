@@ -27,15 +27,7 @@ func main() {
 
 	dispatcher := buildDispatcher()
 	addr := fmt.Sprintf("%s:%d", *host, *port)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		serveWS(w, r, dispatcher)
-	})
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, "ok")
-	})
+	mux := buildMux(dispatcher)
 
 	guiURL, err := startGUI(*host, addr)
 	if err != nil {
@@ -51,6 +43,21 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// buildMux wires the HTTP routes served on the WebSocket port: the
+// WebSocket endpoint itself and /health. Extracted from main so
+// tests can serve the real handler (see server_test.go).
+func buildMux(dispatcher *Dispatcher) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		serveWS(w, r, dispatcher)
+	})
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintln(w, "ok")
+	})
+	return mux
 }
 
 func serveWS(w http.ResponseWriter, r *http.Request, dispatcher *Dispatcher) {

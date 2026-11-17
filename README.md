@@ -2,7 +2,7 @@
 
 A WebSocket relay speaking **JSON-RPC 2.0**: the **Comms Shim**.
 
-- **Server (localhostServer):** Go, standard library only — no external dependencies
+- **Server (localhostServer):** Go; the server itself uses only the standard library (the module's few dependencies are test-only)
 - **Client:** a drop-in vanilla-JS snippet for any web page
 - **GUI:** served by localhostServer on a random port (see How to run)
 
@@ -36,10 +36,8 @@ The names we use for the parts of this system:
 
 ### Prerequisites
 
-- Go 1.20 or newer (the module targets `go 1.20`; standard library
-  only, so there are no dependencies to install)
+- Go 1.20 or newer (the module targets `go 1.20`)
 - A clone of this repo
-- Python 3, for the end-to-end tests only
 
 ### Run localhostServer
 
@@ -76,15 +74,14 @@ auto-connects and auto-echoes `"hello"`.
 
 ### Run the tests
 
-With the server running:
-
 ```sh
-python3 tests/test_client.py
-# PASS  echo string 'hello': got='hello' expected='hello'
-# PASS  echo object ...
-# PASS  ping ...
-# ALL PASS
+go test ./...
 ```
+
+Unit tests cover the JSON-RPC dispatcher directly; integration
+tests run the real handler over a WebSocket connection and check
+the GUI page. No server needs to be running first — the tests
+start their own.
 
 Drop-in snippet for your own page — see `client/snippet.js`:
 
@@ -133,11 +130,11 @@ server/
   websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
   rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
   gui.go        — GUI listener (random port) + snippet page
+  rpc_test.go   — dispatcher unit tests
+  server_test.go — WebSocket + GUI integration tests
 client/
   snippet.js    — drop-in WsRpc client class + wsEcho() helper
   demo.html     — self-contained test page
-tests/
-  test_client.py — stdlib Python WebSocket client, end-to-end checks
 ```
 
 Design notes: transport and protocol are separate layers; adding a method is
