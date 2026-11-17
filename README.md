@@ -51,7 +51,7 @@ The names we use for the parts of this system (Steve's terms,
 - Go. On the MacBook Dev machine Go 1.20.3 is at
   `/usr/local/go/bin/go` (not on PATH in non-login shells — the
   commands below add it).
-- This repo, cloned (see WORKFLOW.md for how we share it).
+- This repo, cloned (see `.agents/WORKFLOW.md` for how we share it).
 
 ### Run localhostServer
 
