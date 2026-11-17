@@ -1,0 +1,12 @@
+# Build output
+/server/websocket-relay
+/websocket-relay
+*.exe
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
