@@ -2,9 +2,9 @@
 
 A WebSocket relay speaking **JSON-RPC 2.0**, built step by step.
 
-- **Server:** Go (standard library only — no external dependencies), on the MacBook Dev machine
+- **Server (localhostServer):** Go (standard library only — no external dependencies), on the MacBook Dev machine
 - **Client:** a drop-in vanilla-JS snippet for any web page
-- **Step 1 (current): Echo** — browser sends `hello`, server sends the same message back
+- **Step 2 (current): GUI** — localhostServer also serves the Comms Shim GUI on a random port; Step 1's echo is the underlying demo
 
 ## Where it lives
 
@@ -40,20 +40,58 @@ The names we use for the parts of this system (Steve's terms,
   and will eventually become a web app built with vanilla JS, CSS,
   HTML and standard web components.
 
-## Run the server (on the Mac)
+## How to run
 
-Go is at `/usr/local/go/bin/go` on the MacBook (not on PATH in non-login shells):
+> **Living section.** This is how to run everything that exists so
+> far, and it is updated every time setup changes. (Current as of
+> Step 2: GUI.)
+
+### Prerequisites
+
+- Go. On the MacBook Dev machine Go 1.20.3 is at
+  `/usr/local/go/bin/go` (not on PATH in non-login shells — the
+  commands below add it).
+- This repo, cloned (see WORKFLOW.md for how we share it).
+
+### Run localhostServer
+
+On the Mac (so `localhost` below is the Mac):
 
 ```sh
 cd ~/Sync/projects/websocket-relay
 export PATH="$PATH:/usr/local/go/bin"
-go run ./server                 # ws://127.0.0.1:8765
-# or: go run ./server -port 9000
+go run ./server
+# or build once: go build -o /tmp/websocket-relay ./server && /tmp/websocket-relay
+# options: -host 127.0.0.1 (default), -port 8765 (default, WebSocket port)
 ```
 
-## Test it
+Startup prints both addresses — the GUI port is **random**, chosen
+fresh on every run:
 
-Automated (from the VM or the Mac, server running):
+```
+Comms Shim — localhostServer
+  WebSocket (JSON-RPC 2.0): ws://127.0.0.1:8765
+  GUI: http://127.0.0.1:51234        <- example; your port will differ
+  methods: echo, ping
+```
+
+Leave it running; Ctrl+C stops it.
+
+### Use the GUI
+
+1. Open the printed GUI link in a browser on the same machine.
+2. The page shows the client snippet with localhostServer's real
+   address already filled in. Click **Copy snippet**.
+3. On any web page, open the developer console (F12 / Cmd+Option+J),
+   paste, and run: `await wsEcho('hello')` → `"hello"` comes back.
+
+There is also a self-contained test page, `client/demo.html` — open
+it in a browser on the Mac while the server runs; it auto-connects
+and auto-echoes `"hello"`.
+
+### Run the tests
+
+With the server running:
 
 ```sh
 python3 tests/test_client.py
@@ -62,12 +100,6 @@ python3 tests/test_client.py
 # PASS  ping ...
 # ALL PASS
 ```
-
-In a browser (on the Mac, so `localhost` is the Mac):
-
-1. Start the server as above
-2. Open `client/demo.html` in a browser on the Mac
-3. It auto-connects and auto-echoes `"hello"` on load, or type a message and hit **Send echo**
 
 Drop-in snippet for your own page — see `client/snippet.js`:
 
@@ -110,10 +142,12 @@ Notifications (no `id`) get no response, per spec. Batch requests are supported.
 ## Layout
 
 ```
+assets.go       — module-root package embedding client/snippet.js for the GUI
 server/
-  main.go       — entry point, HTTP listener, connection loop
+  main.go       — entry point, WS listener, connection loop, startup banner
   websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
   rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
+  gui.go        — GUI listener (random port) + snippet page
 client/
   snippet.js    — drop-in WsRpc client class + wsEcho() helper
   demo.html     — self-contained test page
@@ -128,7 +162,7 @@ per method lookup, O(n) in message size.
 ## Roadmap
 
 - [x] Step 1 — Echo
-- [ ] Step 2 — GUI: localhostServer serves its GUI on a random port
+- [x] Step 2 — GUI: localhostServer serves its GUI on a random port
       (link printed at startup); page shows the client snippet to drop
       into the dev console
 - [ ] Later — GUI grows into a full web app (vanilla JS/CSS/HTML +

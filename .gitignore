@@ -3,6 +3,9 @@
 /websocket-relay
 *.exe
 
+# Agent working state — local only, never committed
+SESSION_STATE.md
+
 # Logs
 *.log
 
