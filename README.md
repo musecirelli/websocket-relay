@@ -20,8 +20,8 @@ The names we use for the parts of this system:
 - **localhostServer** — the server component of the Comms Shim. Runs
   on the user's localhost, accepts WebSocket connections from the
   client snippet, speaks JSON-RPC 2.0. Currently the Go program in
-  `server/`, listening on `ws://127.0.0.1:8765`.
-- **Client snippet** — the drop-in JavaScript (`client/snippet.js`)
+  `src/server/`, listening on `ws://127.0.0.1:8765`.
+- **Client snippet** — the drop-in JavaScript (`src/client/snippet.js`)
   pasted into a web page or the browser developer console; it connects
   the page to localhostServer.
 - **GUI** — localhostServer's web GUI, reachable at
@@ -43,14 +43,27 @@ The names we use for the parts of this system:
   binaries current macOS refuses to run: `dyld: missing LC_UUID`.)
 - A clone of this repo
 
-### Run localhostServer
+### Build and run localhostServer
+
+The Go module lives in `src/`; all build artifacts go to `build/`.
+The Makefile at the repo root wraps both modes:
 
 ```sh
-cd websocket-relay
-go run ./server
-# or build once: go build -o websocket-relay ./server && ./websocket-relay
-# options: -host 127.0.0.1 (default), -port 8765 (default, WebSocket port)
+# Debugging — race detector on, optimizations off
+make run            # build in memory and run
+make build          # or just build: build/debug/websocket-relay
+
+# Production — static (CGO off), trimmed and stripped
+make build-release  # build/release/websocket-relay
+make run-release    # build it and run it
+
+# Server options (pass to the binary, or after `go run`):
+#   -host 127.0.0.1 (default)   -port 8765 (default, WebSocket port)
+./build/release/websocket-relay -port 9000
 ```
+
+Without make, the plain Go commands work from inside `src/`
+(e.g. `go run ./server`). `make clean` empties `build/`.
 
 Startup prints both addresses — the GUI port is **random**, chosen
 fresh on every run:
@@ -72,14 +85,14 @@ Leave it running; Ctrl+C stops it.
 3. On any web page, open the developer console (F12 / Cmd+Option+J),
    paste, and run: `await wsEcho('hello')` → `"hello"` comes back.
 
-There is also a self-contained test page, `client/demo.html` — open
-it in a browser on the same machine while the server runs; it
+There is also a self-contained test page, `src/client/demo.html` —
+open it in a browser on the same machine while the server runs; it
 auto-connects and auto-echoes `"hello"`.
 
 ### Run the tests
 
 ```sh
-go test ./...
+make test           # or: cd src && go test ./...
 ```
 
 Unit tests cover the JSON-RPC dispatcher directly; integration
@@ -87,7 +100,7 @@ tests run the real handler over a WebSocket connection and check
 the GUI page. No server needs to be running first — the tests
 start their own.
 
-Drop-in snippet for your own page — see `client/snippet.js`:
+Drop-in snippet for your own page — see `src/client/snippet.js`:
 
 ```js
 const rpc = new WsRpc('ws://127.0.0.1:8765');
@@ -128,18 +141,24 @@ Notifications (no `id`) get no response, per spec. Batch requests are supported.
 ## Layout
 
 ```
+Makefile        — build/run/test entry points (debug + production)
 mise.toml       — pinned tool versions (Go), for mise
-assets.go       — module-root package embedding client/snippet.js for the GUI
-server/
-  main.go       — entry point, WS listener, connection loop, startup banner
-  websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
-  rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
-  gui.go        — GUI listener (random port) + snippet page
-  rpc_test.go   — dispatcher unit tests
-  server_test.go — WebSocket + GUI integration tests
-client/
-  snippet.js    — drop-in WsRpc client class + wsEcho() helper
-  demo.html     — self-contained test page
+src/            — the Go module
+  go.mod, go.sum
+  assets.go     — module-root package embedding client/snippet.js for the GUI
+  server/
+    main.go       — entry point, WS listener, connection loop, startup banner
+    websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
+    rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
+    gui.go        — GUI listener (random port) + snippet page
+    rpc_test.go   — dispatcher unit tests
+    server_test.go — WebSocket + GUI integration tests
+  client/
+    snippet.js    — drop-in WsRpc client class + wsEcho() helper
+    demo.html     — self-contained test page
+build/          — build artifacts and executables (generated, gitignored)
+  debug/          make build
+  release/        make build-release
 ```
 
 Design notes: transport and protocol are separate layers; adding a method is

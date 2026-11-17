@@ -5,11 +5,11 @@
 // Transport (websocket.go) is separate from protocol (rpc.go):
 // Clean Architecture — the dispatcher knows nothing about sockets.
 //
-// Run:
+// Run (from the repo root):
 //
-//	go run ./server [--host 127.0.0.1] [--port 8765]
-//	# or
-//	go build -o websocket-relay ./server && ./websocket-relay
+//	make run          # debug: race detector on
+//	make run-release  # production build, then run
+//	# or, from src/: go run ./server [--host 127.0.0.1] [--port 8765]
 package main
 
 import (
