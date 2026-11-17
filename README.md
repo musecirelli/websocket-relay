@@ -16,6 +16,30 @@ A WebSocket relay speaking **JSON-RPC 2.0**, built step by step.
 
 Version control: this folder is a **git repo**. Commit as we go, step by step.
 
+## Terminology
+
+The names we use for the parts of this system (Steve's terms,
+2026-11-17 — use them exactly):
+
+- **Comms Shim** — the whole local system: a WebSocket server running
+  on the user's own machine plus its GUI and client snippet, letting a
+  web page talk to the user's localhost. ("Shim" because it's a thin
+  layer dropped between the browser page and the local machine.)
+- **localhostServer** — the server component of the Comms Shim. Runs
+  on the user's localhost, accepts WebSocket connections from the
+  client snippet, speaks JSON-RPC 2.0. Currently the Go program in
+  `server/`, listening on `ws://127.0.0.1:8765`.
+- **Client snippet** — the drop-in JavaScript (`client/snippet.js`)
+  pasted into a web page or the browser developer console; it connects
+  the page to localhostServer.
+- **GUI** — localhostServer's web GUI, reachable at
+  `http://localhost:<random port>`. The port is random (chosen at
+  startup) and the full link is displayed on the command line when the
+  server runs. For now the GUI is one simple page — "here's the code
+  snippet to drop in your developer console", with the snippet code —
+  and will eventually become a web app built with vanilla JS, CSS,
+  HTML and standard web components.
+
 ## Run the server (on the Mac)
 
 Go is at `/usr/local/go/bin/go` on the MacBook (not on PATH in non-login shells):
@@ -104,4 +128,8 @@ per method lookup, O(n) in message size.
 ## Roadmap
 
 - [x] Step 1 — Echo
-- [ ] Step 2 — TBD with Steve (relay between two clients? named rooms? …)
+- [ ] Step 2 — GUI: localhostServer serves its GUI on a random port
+      (link printed at startup); page shows the client snippet to drop
+      into the dev console
+- [ ] Later — GUI grows into a full web app (vanilla JS/CSS/HTML +
+      standard web components); relay features TBD with Steve
