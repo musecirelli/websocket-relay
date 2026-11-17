@@ -1,25 +1,17 @@
 # websocket-relay
 
-A WebSocket relay speaking **JSON-RPC 2.0**, built step by step.
+A WebSocket relay speaking **JSON-RPC 2.0**: the **Comms Shim**.
 
-- **Server (localhostServer):** Go (standard library only — no external dependencies), on the MacBook Dev machine
+- **Server (localhostServer):** Go, standard library only — no external dependencies
 - **Client:** a drop-in vanilla-JS snippet for any web page
-- **Step 2 (current): GUI** — localhostServer also serves the Comms Shim GUI on a random port; Step 1's echo is the underlying demo
+- **GUI:** served by localhostServer on a random port (see How to run)
 
-## Where it lives
-
-| Side | Path |
-|---|---|
-| Steve ↔ MacBook (Syncthing `projects`) | `~/Sync/projects/websocket-relay/` on the Mac |
-| Muse VM (rsync staging) | `~/sync/projects/websocket-relay/` |
-| MacBook Dev | same Syncthing path — build & run there |
-
-Version control: this folder is a **git repo**. Commit as we go, step by step.
+Version control: git. Changes are exchanged as patch series
+(`git format-patch` / `git am`) — see `.agents/WORKFLOW.md`.
 
 ## Terminology
 
-The names we use for the parts of this system (Steve's terms,
-2026-11-17 — use them exactly):
+The names we use for the parts of this system:
 
 - **Comms Shim** — the whole local system: a WebSocket server running
   on the user's own machine plus its GUI and client snippet, letting a
@@ -42,26 +34,19 @@ The names we use for the parts of this system (Steve's terms,
 
 ## How to run
 
-> **Living section.** This is how to run everything that exists so
-> far, and it is updated every time setup changes. (Current as of
-> Step 2: GUI.)
-
 ### Prerequisites
 
-- Go. On the MacBook Dev machine Go 1.20.3 is at
-  `/usr/local/go/bin/go` (not on PATH in non-login shells — the
-  commands below add it).
-- This repo, cloned (see `.agents/WORKFLOW.md` for how we share it).
+- Go 1.20 or newer (the module targets `go 1.20`; standard library
+  only, so there are no dependencies to install)
+- A clone of this repo
+- Python 3, for the end-to-end tests only
 
 ### Run localhostServer
 
-On the Mac (so `localhost` below is the Mac):
-
 ```sh
-cd ~/Sync/projects/websocket-relay
-export PATH="$PATH:/usr/local/go/bin"
+cd websocket-relay
 go run ./server
-# or build once: go build -o /tmp/websocket-relay ./server && /tmp/websocket-relay
+# or build once: go build -o websocket-relay ./server && ./websocket-relay
 # options: -host 127.0.0.1 (default), -port 8765 (default, WebSocket port)
 ```
 
@@ -86,8 +71,8 @@ Leave it running; Ctrl+C stops it.
    paste, and run: `await wsEcho('hello')` → `"hello"` comes back.
 
 There is also a self-contained test page, `client/demo.html` — open
-it in a browser on the Mac while the server runs; it auto-connects
-and auto-echoes `"hello"`.
+it in a browser on the same machine while the server runs; it
+auto-connects and auto-echoes `"hello"`.
 
 ### Run the tests
 
@@ -130,7 +115,7 @@ Error response (e.g. unknown method):
 {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found: …"}, "id": 1}
 ```
 
-Methods in Step 1:
+Methods:
 
 | Method | Params | Result |
 |---|---|---|
@@ -161,9 +146,9 @@ per method lookup, O(n) in message size.
 
 ## Roadmap
 
-- [x] Step 1 — Echo
-- [x] Step 2 — GUI: localhostServer serves its GUI on a random port
-      (link printed at startup); page shows the client snippet to drop
-      into the dev console
-- [ ] Later — GUI grows into a full web app (vanilla JS/CSS/HTML +
-      standard web components); relay features TBD with Steve
+- [x] Echo over JSON-RPC 2.0
+- [x] GUI on a random port (link printed at startup); page shows the
+      client snippet to drop into the dev console
+- [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
+      web components)
+- [ ] Relay between connected clients (design TBD)
