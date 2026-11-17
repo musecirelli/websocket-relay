@@ -23,6 +23,22 @@ git log --oneline   # should match the maintainer tree exactly
 A bundle is a single file that acts as a read-only remote:
 later you can also `git fetch ../websocket-relay.bundle` from a newer one.
 
+## Patch numbering
+
+Patch numbers are **global to the project**, not per-series: they
+count every patch ever sent, in commit order, starting at `0001`
+for the first commit in history. A new series continues where the
+last one stopped — generate it with an explicit start number:
+
+```sh
+git format-patch --start-number <next> <base>..HEAD
+```
+
+(Without `--start-number`, format-patch restarts at `0001` every
+time, which makes separately delivered series indistinguishable.)
+As of this note, patches `0001`–`0007` have been delivered; the
+next patch is `0008`.
+
 ## Receiving work (applying a patch series)
 
 For each step, Muse sends a numbered patch series
