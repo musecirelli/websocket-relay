@@ -178,8 +178,9 @@ func orNull(id json.RawMessage) json.RawMessage {
 // --- Step 1 methods -------------------------------------------------------
 
 // echo returns params verbatim.
-//   params="hello"              -> "hello"
-//   params={"message":"hello"} -> {"message":"hello"}
+//
+//	params="hello"              -> "hello"
+//	params={"message":"hello"} -> {"message":"hello"}
 func echoHandler(params json.RawMessage) (json.RawMessage, error) {
 	if params == nil {
 		return json.RawMessage("null"), nil
