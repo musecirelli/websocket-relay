@@ -36,7 +36,11 @@ The names we use for the parts of this system:
 
 ### Prerequisites
 
-- Go 1.20 or newer (the module targets `go 1.20`)
+- Go, at the version pinned in `mise.toml` (currently 1.27.4).
+  With [mise](https://mise.jdx.dev): run `mise install` in the repo
+  root — it installs and selects the pinned Go. Without mise, install
+  Go 1.27 or newer from go.dev. (Older Go versions, e.g. 1.22, produce
+  binaries current macOS refuses to run: `dyld: missing LC_UUID`.)
 - A clone of this repo
 
 ### Run localhostServer
@@ -124,6 +128,7 @@ Notifications (no `id`) get no response, per spec. Batch requests are supported.
 ## Layout
 
 ```
+mise.toml       — pinned tool versions (Go), for mise
 assets.go       — module-root package embedding client/snippet.js for the GUI
 server/
   main.go       — entry point, WS listener, connection loop, startup banner
