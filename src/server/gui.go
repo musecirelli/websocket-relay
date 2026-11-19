@@ -51,7 +51,10 @@ func (g *gui) page(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	snippet := strings.ReplaceAll(relay.ClientSnippet, defaultWSAddr, g.wsAddr)
+	// The GUI hands out the Closure-compiled snippet; only the live
+	// listen address is rewritten into it (the default address is a
+	// string literal and survives compilation untouched).
+	snippet := strings.ReplaceAll(relay.ClientSnippetMin, defaultWSAddr, g.wsAddr)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := guiPage.Execute(w, map[string]string{
 		"WSAddr":  g.wsAddr,
@@ -85,9 +88,14 @@ var guiPage = template.Must(template.New("gui").Parse(`<!DOCTYPE html>
   <li>Open any web page, then open its developer console
       (F12, or Cmd+Option+J).</li>
   <li>Copy the snippet below and paste it into the console.</li>
-  <li>Try it: <code>await wsEcho('hello')</code> — the server echoes
-      <code>"hello"</code> back.</li>
+  <li>The <strong>Relay Tool</strong> window appears on the page —
+      pick a function on the left (Echo for now), type, and Send.
+      In the console you can also try
+      <code>await wsEcho('hello')</code>.</li>
 </ol>
+<p>The snippet is minified (Closure Compiler) — the readable source
+   is <code>src/client/snippet.js</code> in the repo. All it does is
+   connect and load the Relay Tool from localhostServer.</p>
 <p><button id="copy" type="button">Copy snippet</button></p>
 <pre id="snippet">{{.Snippet}}</pre>
 

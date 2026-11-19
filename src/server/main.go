@@ -46,8 +46,9 @@ func main() {
 }
 
 // buildMux wires the HTTP routes served on the WebSocket port: the
-// WebSocket endpoint itself and /health. Extracted from main so
-// tests can serve the real handler (see server_test.go).
+// WebSocket endpoint itself, /health, and /relay-tool.js (the Relay
+// Tool the snippet loads). Extracted from main so tests can serve
+// the real handler (see server_test.go).
 func buildMux(dispatcher *Dispatcher) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,7 @@ func buildMux(dispatcher *Dispatcher) *http.ServeMux {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "ok")
 	})
+	mux.HandleFunc("GET /relay-tool.js", relayToolHandler)
 	return mux
 }
 
