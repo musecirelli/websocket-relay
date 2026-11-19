@@ -1,2 +1,19 @@
+# Pinned tool versions for this project (https://mise.jdx.dev).
+# Run `mise install` in this directory to get exactly these.
 [tools]
 go = "1.27.4"
+# node + Closure Compiler are build-time only: they compile the
+# client snippet (see the build-snippet task). The server itself
+# needs nothing but Go. The Closure npm package runs its Java
+# build, which needs Java 21+ — pinned here so every machine
+# gets a new enough JDK from mise alone.
+node = "22.23.5"
+java = "21.0.13+9.0.LTS"
+"npm:google-closure-compiler" = "20261117.0.0"
+
+# Compile the drop-in client snippet with Google Closure Compiler.
+# SIMPLE keeps the snippet's global API names (WsRpc, CommsShim,
+# wsEcho) intact while removing whitespace/comments and inlining.
+[tasks.build-snippet]
+description = "Compile src/client/snippet.js -> src/client/snippet.min.js with Closure Compiler"
+run = "google-closure-compiler --js src/client/snippet.js --js_output_file src/client/snippet.min.js --compilation_level SIMPLE --language_out ECMASCRIPT_2020 --charset UTF-8"
