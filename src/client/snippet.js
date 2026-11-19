@@ -1,19 +1,22 @@
 /**
- * websocket-relay — drop-in browser snippet (Step 1: Echo)
+ * Comms Shim — client snippet (loader).
  *
- * Paste this whole file into a page (or load it with <script src="snippet.js">),
- * then:
+ * Paste this whole file into a page's developer console (or load it
+ * with <script src="snippet.js">). It connects to localhostServer,
+ * asks it for the Relay Tool, and the tool window appears on the
+ * page. Nothing else to do.
  *
- *   const rpc = new WsRpc('ws://127.0.0.1:8765');
- *   await rpc.connect();
- *   const result = await rpc.call('echo', 'hello');
- *   console.log(result); // "hello"
+ * What it exposes on window:
+ *   CommsShim  — { rpc, loadScript, loadRelayTool, connect,
+ *                  serverUrl, toolVersion }
+ *   WsRpc      — the JSON-RPC 2.0 client class (used by the tool)
+ *   wsEcho     — convenience: await wsEcho('hello') -> "hello"
  *
- *   // or with an object:
- *   await rpc.call('echo', { message: 'hello' }); // -> { message: 'hello' }
+ * The loader (CommsShim.loadScript) is infrastructure: it is not
+ * one of the Relay Tool's listed functions.
  *
- * No dependencies. Vanilla JS, Promises keyed by JSON-RPC id.
- * Pending-call lookup is O(1); ids increment monotonically.
+ * No dependencies. Vanilla JS. Pending-call lookup is O(1);
+ * JSON-RPC ids increment monotonically.
  */
 class WsRpc {
   constructor(url = 'ws://127.0.0.1:8765') {
@@ -41,7 +44,6 @@ class WsRpc {
   _onMessage(data) {
     let msg;
     try { msg = JSON.parse(data); } catch { return; }
-    // Handle single responses (batch support can be added later)
     const responses = Array.isArray(msg) ? msg : [msg];
     for (const res of responses) {
       const pending = this._pending.get(res.id);
@@ -81,19 +83,72 @@ class WsRpc {
   }
 }
 
-// Convenience for the absolute simplest test in a console / page:
-//   await wsEcho('hello')  // -> "hello"
-let _defaultRpc = null;
+/**
+ * CommsShim — the loader. Owns the shared connection to
+ * localhostServer and loads JavaScript from it (the Relay Tool
+ * today; anything else the server offers later).
+ */
+const CommsShim = {
+  // Rewritten by the GUI to localhostServer's live address when the
+  // snippet is copied from the GUI page.
+  serverUrl: 'ws://127.0.0.1:8765',
+  rpc: null,         // shared WsRpc, set by connect()
+  toolVersion: null, // set by the Relay Tool when it loads
+
+  /** HTTP base of localhostServer (ws:// -> http://). */
+  get httpBase() {
+    return this.serverUrl.replace(/^ws/, 'http');
+  },
+
+  /**
+   * Load and evaluate a JavaScript file from url. Resolves once
+   * the script has run. This is the JS loader the Relay Tool is
+   * fetched with; it is not itself a tool function.
+   */
+  loadScript(url) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = url;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load ${url}`));
+      document.head.appendChild(script);
+    });
+  },
+
+  /** Connect the shared WebSocket (once) and return the WsRpc. */
+  async connect() {
+    if (!this.rpc) {
+      this.rpc = new WsRpc(this.serverUrl);
+      await this.rpc.connect();
+    }
+    return this.rpc;
+  },
+
+  /** Ask localhostServer for the Relay Tool and show it. */
+  async loadRelayTool() {
+    await this.loadScript(`${this.httpBase}/relay-tool.js`);
+  },
+
+  /** Connect, then load the Relay Tool. Runs automatically below. */
+  async start() {
+    await this.connect();
+    await this.loadRelayTool();
+    console.log(`[Comms Shim] Relay Tool v${this.toolVersion} ready`);
+  },
+};
+
+// Convenience for the simplest test in a console:
+//   await wsEcho('hello')  // -> "hello"   (uses the shared connection)
 async function wsEcho(message = 'hello') {
-  if (!_defaultRpc) {
-    _defaultRpc = new WsRpc('ws://127.0.0.1:8765');
-    await _defaultRpc.connect();
-  }
-  return _defaultRpc.call('echo', message);
+  const rpc = await CommsShim.connect();
+  return rpc.call('echo', message);
 }
 
-// Expose for <script> tag usage
+// Expose for <script> tag usage, then start automatically.
 if (typeof window !== 'undefined') {
   window.WsRpc = WsRpc;
   window.wsEcho = wsEcho;
+  window.CommsShim = CommsShim;
+  CommsShim.start().catch((e) =>
+    console.error('[Comms Shim] localhostServer not reachable — is it running?', e));
 }
