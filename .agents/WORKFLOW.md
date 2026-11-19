@@ -1,86 +1,43 @@
-# Collaboration workflow — Linux kernel style
+# Collaboration workflow — GitHub fork and pull request
 
-This project is developed the way the Linux kernel is: **distributed,
-patch-based, no GitHub.** There is no canonical hosted remote and no
-pull requests. (The kernel's GitHub presence is a read-only mirror;
-patches there are ignored. The real flow is `git format-patch` →
-email → `git am`, with maintainers' trees on kernel.org.)
+This project lives on GitHub so it can be worked on from any
+computer.
 
-Our equivalent of the mailing list is this chat + email between Steve
-and Muse. Our equivalent of kernel.org is a `git bundle` for the
-initial clone.
+- **Canonical repo:** https://github.com/scirelli/websocket-relay
+  (Steve's). `main` there is the source of truth.
+- **Muse's fork:** https://github.com/musecirelli/websocket-relay
+- Steve works directly on the canonical repo (or his own branches).
+- Muse works on the fork and opens pull requests against
+  `scirelli/websocket-relay:main`; Steve reviews and merges.
 
-## Bootstrap (once)
-
-Muse sends `websocket-relay.bundle` (full history, exact commit IDs).
+## Working flow
 
 ```sh
-git clone websocket-relay.bundle websocket-relay
+# clone your copy and keep the canonical repo as `upstream`
+git clone git@github.com:<you>/websocket-relay.git
 cd websocket-relay
-git log --oneline   # should match the maintainer tree exactly
+git remote add upstream git@github.com:scirelli/websocket-relay.git
+
+# stay current, branch, commit, push, open a PR
+git fetch upstream && git rebase upstream/main
+git switch -c my-change
+git commit -s -m "area: short imperative summary"
+git push origin my-change
+# open the PR on GitHub against scirelli/websocket-relay:main
 ```
-
-A bundle is a single file that acts as a read-only remote:
-later you can also `git fetch ../websocket-relay.bundle` from a newer one.
-
-## Patch numbering
-
-Patch numbers are **global to the project**, not per-series: they
-count every patch ever sent, in commit order, starting at `0001`
-for the first commit in history. A new series continues where the
-last one stopped — generate it with an explicit start number:
-
-```sh
-git format-patch --start-number <next> <base>..HEAD
-```
-
-(Without `--start-number`, format-patch restarts at `0001` every
-time, which makes separately delivered series indistinguishable.)
-As of this note, patches `0001`–`0007` have been delivered; the
-next patch is `0008`.
-
-## Receiving work (applying a patch series)
-
-For each step, Muse sends a numbered patch series
-(`0001-....patch`, `0002-....patch`, …) produced with `git format-patch`.
-
-```sh
-git am 00*.patch        # applies in order, preserves author + message
-git log --oneline       # review what landed
-```
-
-If a patch doesn't apply cleanly, `git am --abort`, and we discuss —
-same as a maintainer asking for a resend.
-
-## Sending work (your changes back to Muse)
-
-```sh
-git add -A
-git commit -s -m "relay: short imperative summary"
-# -s adds Signed-off-by (kernel DCO convention)
-
-git format-patch -1                 # one patch for the last commit
-# or: git format-patch main~3..main # a series for the last 3
-```
-
-Send the `.patch` files back in chat or by email. Muse reviews them
-(reply = review), then applies them to the maintainer tree with
-`git am`. Review happens *before* applying, like LKML.
 
 ## Conventions
 
-- One logical change per commit; a step = a small series.
+- One logical change per commit; a step = a small series of commits.
 - Commit subjects: short, imperative, prefixed by area when useful
-  (`server:`, `client:`, `rpc:`).
+  (`server:`, `client:`, `rpc:`, `build:`, `docs:`).
 - `Signed-off-by:` on commits (`git commit -s`).
-- The maintainer tree lives on the MacBook Dev machine
-  (`~/Sync/projects/websocket-relay/`); Muse is maintainer for now.
-- Syncthing is *not* the sharing mechanism for this repo — it's just
-  how files reach the Mac. Don't commit in a Syncthing-synced copy;
-  work in your own clone.
 
-## Why not GitHub?
+## History
 
-No central host to depend on, full history on both sides, patches are
-reviewable artifacts in the conversation itself, and it scales from
-two devs to thousands — the kernel is the proof.
+Until 2026-11-19 the project used a Linux-kernel-style patch flow
+(`git format-patch` series numbered globally 0001–0011, exchanged in
+chat, applied with `git am`, bootstrap via `git bundle`). Steve
+switched it to GitHub for multi-computer access; the patch series
+and the commits are the same history — the first GitHub PR carries
+everything past the last commit he had pushed (`2788929`).
