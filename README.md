@@ -1,51 +1,106 @@
 # websocket-relay
 
-A WebSocket relay speaking **JSON-RPC 2.0**, built step by step.
+A WebSocket relay speaking **JSON-RPC 2.0**: the **Comms Shim**.
 
-- **Server:** Go (standard library only — no external dependencies), on the MacBook Dev machine
+- **Server (localhostServer):** Go; the server itself uses only the standard library (the module's few dependencies are test-only)
 - **Client:** a drop-in vanilla-JS snippet for any web page
-- **Step 1 (current): Echo** — browser sends `hello`, server sends the same message back
+- **GUI:** served by localhostServer on a random port (see How to run)
 
-## Where it lives
+Version control: git. Changes are exchanged as patch series
+(`git format-patch` / `git am`) — see `.agents/WORKFLOW.md`.
 
-| Side | Path |
-|---|---|
-| Steve ↔ MacBook (Syncthing `projects`) | `~/Sync/projects/websocket-relay/` on the Mac |
-| Muse VM (rsync staging) | `~/sync/projects/websocket-relay/` |
-| MacBook Dev | same Syncthing path — build & run there |
+## Terminology
 
-Version control: this folder is a **git repo**. Commit as we go, step by step.
+The names we use for the parts of this system:
 
-## Run the server (on the Mac)
+- **Comms Shim** — the whole local system: a WebSocket server running
+  on the user's own machine plus its GUI and client snippet, letting a
+  web page talk to the user's localhost. ("Shim" because it's a thin
+  layer dropped between the browser page and the local machine.)
+- **localhostServer** — the server component of the Comms Shim. Runs
+  on the user's localhost, accepts WebSocket connections from the
+  client snippet, speaks JSON-RPC 2.0. Currently the Go program in
+  `src/server/`, listening on `ws://127.0.0.1:8765`.
+- **Client snippet** — the drop-in JavaScript (`src/client/snippet.js`)
+  pasted into a web page or the browser developer console; it connects
+  the page to localhostServer.
+- **GUI** — localhostServer's web GUI, reachable at
+  `http://localhost:<random port>`. The port is random (chosen at
+  startup) and the full link is displayed on the command line when the
+  server runs. For now the GUI is one simple page — "here's the code
+  snippet to drop in your developer console", with the snippet code —
+  and will eventually become a web app built with vanilla JS, CSS,
+  HTML and standard web components.
 
-Go is at `/usr/local/go/bin/go` on the MacBook (not on PATH in non-login shells):
+## How to run
+
+### Prerequisites
+
+- Go, at the version pinned in `mise.toml` (currently 1.27.4).
+  With [mise](https://mise.jdx.dev): run `mise install` in the repo
+  root — it installs and selects the pinned Go. Without mise, install
+  Go 1.27 or newer from go.dev. (Older Go versions, e.g. 1.22, produce
+  binaries current macOS refuses to run: `dyld: missing LC_UUID`.)
+- A clone of this repo
+
+### Build and run localhostServer
+
+The Go module lives in `src/`; all build artifacts go to `build/`.
+The Makefile at the repo root wraps both modes:
 
 ```sh
-cd ~/Sync/projects/websocket-relay
-export PATH="$PATH:/usr/local/go/bin"
-go run ./server                 # ws://127.0.0.1:8765
-# or: go run ./server -port 9000
+# Debugging — race detector on, optimizations off
+make run            # build in memory and run
+make build          # or just build: build/debug/websocket-relay
+
+# Production — static (CGO off), trimmed and stripped
+make build-release  # build/release/websocket-relay
+make run-release    # build it and run it
+
+# Server options (pass to the binary, or after `go run`):
+#   -host 127.0.0.1 (default)   -port 8765 (default, WebSocket port)
+./build/release/websocket-relay -port 9000
 ```
 
-## Test it
+Without make, the plain Go commands work from inside `src/`
+(e.g. `go run ./server`). `make clean` empties `build/`.
 
-Automated (from the VM or the Mac, server running):
+Startup prints both addresses — the GUI port is **random**, chosen
+fresh on every run:
+
+```
+Comms Shim — localhostServer
+  WebSocket (JSON-RPC 2.0): ws://127.0.0.1:8765
+  GUI: http://127.0.0.1:51234        <- example; your port will differ
+  methods: echo, ping
+```
+
+Leave it running; Ctrl+C stops it.
+
+### Use the GUI
+
+1. Open the printed GUI link in a browser on the same machine.
+2. The page shows the client snippet with localhostServer's real
+   address already filled in. Click **Copy snippet**.
+3. On any web page, open the developer console (F12 / Cmd+Option+J),
+   paste, and run: `await wsEcho('hello')` → `"hello"` comes back.
+
+There is also a self-contained test page, `src/client/demo.html` —
+open it in a browser on the same machine while the server runs; it
+auto-connects and auto-echoes `"hello"`.
+
+### Run the tests
 
 ```sh
-python3 tests/test_client.py
-# PASS  echo string 'hello': got='hello' expected='hello'
-# PASS  echo object ...
-# PASS  ping ...
-# ALL PASS
+make test           # or: cd src && go test ./...
 ```
 
-In a browser (on the Mac, so `localhost` is the Mac):
+Unit tests cover the JSON-RPC dispatcher directly; integration
+tests run the real handler over a WebSocket connection and check
+the GUI page. No server needs to be running first — the tests
+start their own.
 
-1. Start the server as above
-2. Open `client/demo.html` in a browser on the Mac
-3. It auto-connects and auto-echoes `"hello"` on load, or type a message and hit **Send echo**
-
-Drop-in snippet for your own page — see `client/snippet.js`:
+Drop-in snippet for your own page — see `src/client/snippet.js`:
 
 ```js
 const rpc = new WsRpc('ws://127.0.0.1:8765');
@@ -74,7 +129,7 @@ Error response (e.g. unknown method):
 {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found: …"}, "id": 1}
 ```
 
-Methods in Step 1:
+Methods:
 
 | Method | Params | Result |
 |---|---|---|
@@ -86,15 +141,24 @@ Notifications (no `id`) get no response, per spec. Batch requests are supported.
 ## Layout
 
 ```
-server/
-  main.go       — entry point, HTTP listener, connection loop
-  websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
-  rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
-client/
-  snippet.js    — drop-in WsRpc client class + wsEcho() helper
-  demo.html     — self-contained test page
-tests/
-  test_client.py — stdlib Python WebSocket client, end-to-end checks
+Makefile        — build/run/test entry points (debug + production)
+mise.toml       — pinned tool versions (Go), for mise
+src/            — the Go module
+  go.mod, go.sum
+  assets.go     — module-root package embedding client/snippet.js for the GUI
+  server/
+    main.go       — entry point, WS listener, connection loop, startup banner
+    websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
+    rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
+    gui.go        — GUI listener (random port) + snippet page
+    rpc_test.go   — dispatcher unit tests
+    server_test.go — WebSocket + GUI integration tests
+  client/
+    snippet.js    — drop-in WsRpc client class + wsEcho() helper
+    demo.html     — self-contained test page
+build/          — build artifacts and executables (generated, gitignored)
+  debug/          make build
+  release/        make build-release
 ```
 
 Design notes: transport and protocol are separate layers; adding a method is
@@ -103,5 +167,9 @@ per method lookup, O(n) in message size.
 
 ## Roadmap
 
-- [x] Step 1 — Echo
-- [ ] Step 2 — TBD with Steve (relay between two clients? named rooms? …)
+- [x] Echo over JSON-RPC 2.0
+- [x] GUI on a random port (link printed at startup); page shows the
+      client snippet to drop into the dev console
+- [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
+      web components)
+- [ ] Relay between connected clients (design TBD)

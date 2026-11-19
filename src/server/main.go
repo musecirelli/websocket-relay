@@ -1,14 +1,15 @@
-// websocket-relay — Step 1: Echo
+// localhostServer — the server component of the Comms Shim.
 //
-// WebSocket server on localhost speaking JSON-RPC 2.0.
+// WebSocket server on localhost speaking JSON-RPC 2.0, plus the
+// Comms Shim GUI on a separate random port (gui.go).
 // Transport (websocket.go) is separate from protocol (rpc.go):
 // Clean Architecture — the dispatcher knows nothing about sockets.
 //
-// Run:
+// Run (from the repo root):
 //
-//	go run ./server [--host 127.0.0.1] [--port 8765]
-//	# or
-//	go build -o websocket-relay ./server && ./websocket-relay
+//	make run          # debug: race detector on
+//	make run-release  # production build, then run
+//	# or, from src/: go run ./server [--host 127.0.0.1] [--port 8765]
 package main
 
 import (
@@ -26,7 +27,28 @@ func main() {
 
 	dispatcher := buildDispatcher()
 	addr := fmt.Sprintf("%s:%d", *host, *port)
+	mux := buildMux(dispatcher)
 
+	guiURL, err := startGUI(*host, addr)
+	if err != nil {
+		// The shim still works without its GUI; say so and continue.
+		log.Printf("[gui] failed to start: %v", err)
+		guiURL = "(unavailable)"
+	}
+
+	fmt.Println("Comms Shim — localhostServer")
+	fmt.Printf("  WebSocket (JSON-RPC 2.0): ws://%s\n", addr)
+	fmt.Printf("  GUI: %s\n", guiURL)
+	fmt.Printf("  methods: %s\n", strings.Join(dispatcher.Methods(), ", "))
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// buildMux wires the HTTP routes served on the WebSocket port: the
+// WebSocket endpoint itself and /health. Extracted from main so
+// tests can serve the real handler (see server_test.go).
+func buildMux(dispatcher *Dispatcher) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		serveWS(w, r, dispatcher)
@@ -35,12 +57,7 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "ok")
 	})
-
-	log.Printf("websocket-relay listening on ws://%s", addr)
-	log.Printf("methods: %s", strings.Join(dispatcher.Methods(), ", "))
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatal(err)
-	}
+	return mux
 }
 
 func serveWS(w http.ResponseWriter, r *http.Request, dispatcher *Dispatcher) {
