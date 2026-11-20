@@ -30,6 +30,12 @@ The names we use for the parts of this system:
   from localhostServer (`GET /relay-tool.js` on the WebSocket port).
   A floating window on the host page: a function list on the left,
   the selected function's panel on the right.
+- **Remote Server** — the far end of the Chat relay: a separate Go
+  server (`src/remoteserver/`) that localhostServer dials over TCP
+  when a Chat panel connects to it. It speaks newline-delimited
+  JSON, logs everything it receives, and broadcasts lines typed on
+  its console back to connected chats — an operator-staffed test
+  endpoint, listening on port 9000 by default.
 - **GUI** — localhostServer's web GUI, reachable at
   `http://localhost:<random port>`. The port is random (chosen at
   startup) and the full link is displayed on the command line when the
@@ -61,10 +67,10 @@ every target with its description):
 ```sh
 # Debugging — race detector on, optimizations off
 make run            # build in memory and run
-make build          # or just build: build/debug/websocket-relay
+make build          # or just build: build/debug/ (server + remote-server)
 
 # Production — static (CGO off), trimmed and stripped
-make build-release  # build/release/websocket-relay
+make build-release  # build/release/ (server + remote-server)
 make run-release    # build it and run it
 
 # Server options (pass to the binary, or after `go run`):
@@ -82,7 +88,7 @@ fresh on every run:
 Comms Shim — localhostServer
   WebSocket (JSON-RPC 2.0): ws://127.0.0.1:8765
   GUI: http://127.0.0.1:51234        <- example; your port will differ
-  methods: echo, ping
+  methods: echo, ping, relay.connect, relay.disconnect, relay.send, relay.status
 ```
 
 Leave it running; Ctrl+C stops it.
@@ -101,6 +107,23 @@ There is also a demo page, `src/client/demo.html` — open it in a
 browser on the same machine while the server runs; it loads the
 snippet the same way a console paste does and the Relay Tool
 appears.
+
+### Run the Remote Server (for the Chat function)
+
+The Chat function relays to a Remote Server, which is a separate
+program — run it on the machine the Chat panel should connect to:
+
+```sh
+make run-remote     # or: ./build/release/remote-server [-port 9000]
+```
+
+It listens on all interfaces (port 9000 by default), logs every
+message it receives, and broadcasts lines typed on its console to
+all connected chats. Run detached, it can take its console from a
+FIFO instead: `remote-server -console /tmp/rs-in`, then
+`printf 'hello\n' > /tmp/rs-in` sends a line. In the Relay Tool,
+pick **Chat**, enter the Remote Server's `host:port` (a domain name
+works too — localhostServer resolves it), and Connect.
 
 ### Run the tests
 
@@ -133,8 +156,8 @@ header). The client snippet — itself just a loader — fetches and
 evaluates it; the loader is infrastructure and is not one of the
 tool's functions.
 
-The tool's tag names are **version-suffixed** (`relay-tool-v0-2-0`,
-`relay-echo-panel-v0-2-0`, …): a custom element name can only be
+The tool's tag names are **version-suffixed** (`relay-tool-v0-3-0`,
+`relay-echo-panel-v0-3-0`, …): a custom element name can only be
 defined once per page, so versioning the names lets different tool
 versions coexist on one page without colliding — every tag lookup
 in the tool is computed from its version. The GUI stamps the
@@ -152,6 +175,11 @@ elements, `data-` attributes, and CustomEvents; animations in CSS):
   `relay-function-select`.
 - `<relay-echo-panel>` — the Echo function: text field, Send button,
   readonly log with every echo appended.
+- `<relay-chat-panel>` — the Chat function: an address row (host:port
+  input, connect button, red/yellow/green status light), an
+  IRC-style message log, and a message composer. It drives
+  localhostServer's relay methods and renders the messages
+  localhostServer pushes back as notifications.
 
 Adding a function = one entry in the registry in
 `src/client/relay-tool.js` plus one panel component — the same
@@ -186,8 +214,18 @@ Methods:
 |---|---|---|
 | `echo` | anything | params, verbatim |
 | `ping` | — | `"pong"` |
+| `relay.connect` | `{host, port}` | `{remote}` — dials the Remote Server (per browser session) |
+| `relay.disconnect` | — | `"ok"` |
+| `relay.send` | `{text}` | `"ok"` — forwards the text to the Remote Server |
+| `relay.status` | — | `{state, remote}` |
 
 Notifications (no `id`) get no response, per spec. Batch requests are supported.
+
+localhostServer also pushes notifications to the browser:
+`relay.message` (`{from, text}` — a chat message from the Remote
+Server) and `relay.status` (`{state}` — the Remote Server went
+away). The localhostServer↔Remote Server hop is TCP with
+newline-delimited JSON frames: `{"type":"msg","from":"chat","text":"…"}`.
 
 ## Layout
 
@@ -201,10 +239,13 @@ src/            — the Go module
     main.go       — entry point, WS listener, connection loop, startup banner
     websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
     rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
+    relay.go      — Chat relay: per-session Remote Server connection + relay.* methods
     gui.go        — GUI listener (random port) + snippet page
     relaytool.go  — serves the Relay Tool at /relay-tool.js (versioned)
     rpc_test.go   — dispatcher unit tests
-    server_test.go — WebSocket + GUI + Relay Tool integration tests
+    server_test.go — WebSocket + GUI + Relay Tool + relay integration tests
+  remoteserver/
+    main.go       — the Remote Server: TCP NDJSON chat endpoint with an operator console
   client/
     snippet.js      — the loader snippet (source): WsRpc + CommsShim loader
     snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
@@ -228,6 +269,9 @@ per method lookup, O(n) in message size.
       out the minified form
 - [x] Relay Tool (versioned): web-components window served by
       localhostServer, loaded by the snippet; Echo panel
+- [x] Chat function: the Relay Tool relays chat through
+      localhostServer to a Remote Server (TCP, NDJSON); the Remote
+      Server is an operator-staffed test endpoint in this repo
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
 - [ ] More Relay Tool functions
