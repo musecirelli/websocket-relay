@@ -6,8 +6,8 @@ A WebSocket relay speaking **JSON-RPC 2.0**: the **Comms Shim**.
 - **Client:** a drop-in vanilla-JS snippet for any web page
 - **GUI:** served by localhostServer on a random port (see How to run)
 
-Version control: git. Changes are exchanged as patch series
-(`git format-patch` / `git am`) — see `.agents/WORKFLOW.md`.
+Version control: git, hosted on GitHub — canonical repo
+`scirelli/websocket-relay`; see `.agents/WORKFLOW.md`.
 
 ## Terminology
 
@@ -22,8 +22,14 @@ The names we use for the parts of this system:
   client snippet, speaks JSON-RPC 2.0. Currently the Go program in
   `src/server/`, listening on `ws://127.0.0.1:8765`.
 - **Client snippet** — the drop-in JavaScript (`src/client/snippet.js`)
-  pasted into a web page or the browser developer console; it connects
-  the page to localhostServer.
+  pasted into a web page or the browser developer console. It is a
+  *loader*: it connects the page to localhostServer and loads the
+  Relay Tool from it. The GUI hands it out minified (Closure
+  Compiler; see the Relay Tool section).
+- **Relay Tool** — the versioned web-components app the snippet loads
+  from localhostServer (`GET /relay-tool.js` on the WebSocket port).
+  A floating window on the host page: a function list on the left,
+  the selected function's panel on the right.
 - **GUI** — localhostServer's web GUI, reachable at
   `http://localhost:<random port>`. The port is random (chosen at
   startup) and the full link is displayed on the command line when the
@@ -36,17 +42,21 @@ The names we use for the parts of this system:
 
 ### Prerequisites
 
-- Go, at the version pinned in `mise.toml` (currently 1.27.4).
-  With [mise](https://mise.jdx.dev): run `mise install` in the repo
-  root — it installs and selects the pinned Go. Without mise, install
-  Go 1.27 or newer from go.dev. (Older Go versions, e.g. 1.22, produce
+- The toolchains pinned in `mise.toml`. With
+  [mise](https://mise.jdx.dev): run `mise install` in the repo root —
+  it installs Go (currently 1.27.4) plus the build-time-only tools
+  (Node, Java, Closure Compiler) used to compile the client snippet.
+  Without mise, install Go 1.27 or newer from go.dev; the compiled
+  snippet is committed, so Go alone is enough unless you edit
+  `src/client/snippet.js`. (Older Go versions, e.g. 1.22, produce
   binaries current macOS refuses to run: `dyld: missing LC_UUID`.)
 - A clone of this repo
 
 ### Build and run localhostServer
 
 The Go module lives in `src/`; all build artifacts go to `build/`.
-The Makefile at the repo root wraps both modes:
+The Makefile at the repo root wraps both modes (`make help` lists
+every target with its description):
 
 ```sh
 # Debugging — race detector on, optimizations off
@@ -80,14 +90,17 @@ Leave it running; Ctrl+C stops it.
 ### Use the GUI
 
 1. Open the printed GUI link in a browser on the same machine.
-2. The page shows the client snippet with localhostServer's real
-   address already filled in. Click **Copy snippet**.
-3. On any web page, open the developer console (F12 / Cmd+Option+J),
-   paste, and run: `await wsEcho('hello')` → `"hello"` comes back.
+2. The page shows the client snippet (minified) with localhostServer's
+   real address already filled in. Click **Copy snippet**.
+3. On any web page, open the developer console (F12 / Cmd+Option+J)
+   and paste. The snippet connects and loads the Relay Tool — its
+   window appears on the page. Pick **Echo**, type a message, Send.
+   From the console, `await wsEcho('hello')` also works.
 
-There is also a self-contained test page, `src/client/demo.html` —
-open it in a browser on the same machine while the server runs; it
-auto-connects and auto-echoes `"hello"`.
+There is also a demo page, `src/client/demo.html` — open it in a
+browser on the same machine while the server runs; it loads the
+snippet the same way a console paste does and the Relay Tool
+appears.
 
 ### Run the tests
 
@@ -100,17 +113,46 @@ tests run the real handler over a WebSocket connection and check
 the GUI page. No server needs to be running first — the tests
 start their own.
 
-Drop-in snippet for your own page — see `src/client/snippet.js`:
+For your own page, the snippet does everything on paste; its API
+after loading (see `src/client/snippet.js`):
 
 ```js
-const rpc = new WsRpc('ws://127.0.0.1:8765');
+CommsShim.rpc            // the shared WsRpc connection
+await wsEcho('hello');   // -> "hello"
+const rpc = new WsRpc('ws://127.0.0.1:8765');  // or your own connection
 await rpc.connect();
-const result = await rpc.call('echo', 'hello');
-console.log(result); // "hello"
-
-// or the one-liner:
-await wsEcho('hello'); // "hello"
+await rpc.call('echo', 'hello');
 ```
+
+## The Relay Tool
+
+The Relay Tool is a small web-components app served by
+localhostServer at `GET /relay-tool.js` (WebSocket port), versioned
+(`X-Relay-Tool-Version` header; the version also shows in the tool's
+header). The client snippet — itself just a loader — fetches and
+evaluates it; the loader is infrastructure and is not one of the
+tool's functions.
+
+Components (all vanilla custom elements; communication via custom
+elements, `data-` attributes, and CustomEvents; animations in CSS):
+
+- `<relay-tool>` — the floating window: drag by the header, resize
+  by the corner (CSS `resize`), close with ×.
+- `<relay-function-list>` — left panel listing the functions from a
+  registry; clicking one marks it active and fires
+  `relay-function-select`.
+- `<relay-echo-panel>` — the Echo function: text field, Send button,
+  readonly log with every echo appended.
+
+Adding a function = one entry in the registry in
+`src/client/relay-tool.js` plus one panel component — the same
+Registry pattern as the server's method Dispatcher.
+
+**Snippet compilation:** the GUI hands out the snippet compiled by
+Google Closure Compiler (`src/client/snippet.min.js`, committed).
+`make` recompiles it when `snippet.js` changes, via the mise task
+`build-snippet`; if the compiler isn't installed at that point,
+make stops and asks you to run `mise install`.
 
 ## Protocol
 
@@ -141,21 +183,24 @@ Notifications (no `id`) get no response, per spec. Batch requests are supported.
 ## Layout
 
 ```
-Makefile        — build/run/test entry points (debug + production)
-mise.toml       — pinned tool versions (Go), for mise
+Makefile        — build/run/test entry points (debug + production); `make help` documents them
+mise.toml       — pinned tools (Go; Node/Java/Closure for the snippet build) + mise tasks
 src/            — the Go module
   go.mod, go.sum
-  assets.go     — module-root package embedding client/snippet.js for the GUI
+  assets.go     — module-root package embedding the client files
   server/
     main.go       — entry point, WS listener, connection loop, startup banner
     websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
     rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
     gui.go        — GUI listener (random port) + snippet page
+    relaytool.go  — serves the Relay Tool at /relay-tool.js (versioned)
     rpc_test.go   — dispatcher unit tests
-    server_test.go — WebSocket + GUI integration tests
+    server_test.go — WebSocket + GUI + Relay Tool integration tests
   client/
-    snippet.js    — drop-in WsRpc client class + wsEcho() helper
-    demo.html     — self-contained test page
+    snippet.js      — the loader snippet (source): WsRpc + CommsShim loader
+    snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
+    relay-tool.js   — the Relay Tool web-components app (served by localhostServer)
+    demo.html       — demo page: loads the snippet like a console paste
 build/          — build artifacts and executables (generated, gitignored)
   debug/          make build
   release/        make build-release
@@ -170,6 +215,11 @@ per method lookup, O(n) in message size.
 - [x] Echo over JSON-RPC 2.0
 - [x] GUI on a random port (link printed at startup); page shows the
       client snippet to drop into the dev console
+- [x] Snippet compiled with Closure Compiler (mise task); GUI hands
+      out the minified form
+- [x] Relay Tool v0.1.0: versioned web-components window served by
+      localhostServer, loaded by the snippet; Echo panel
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
+- [ ] More Relay Tool functions
 - [ ] Relay between connected clients (design TBD)

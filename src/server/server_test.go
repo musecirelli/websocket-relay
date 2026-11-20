@@ -199,6 +199,26 @@ func TestHealth(t *testing.T) {
 	assert.Equal(t, "ok\n", string(body))
 }
 
+func TestRelayToolServed(t *testing.T) {
+	// The snippet loads the Relay Tool from the WebSocket port:
+	// GET /relay-tool.js must return the web-components app with
+	// its version header.
+	srv := startTestServer(t)
+	resp, err := http.Get(srv.URL + "/relay-tool.js")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "javascript")
+	assert.Equal(t, RelayToolVersion, resp.Header.Get("X-Relay-Tool-Version"))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	js := string(body)
+	assert.Contains(t, js, "relay-tool", "tool must define the <relay-tool> component")
+	assert.Contains(t, js, "relay-echo-panel")
+	assert.Contains(t, js, RelayToolVersion, "tool JS must carry its version")
+}
+
 func TestGUIServesSnippetForLiveAddress(t *testing.T) {
 	// Non-default WS address: the page must show the snippet pointing
 	// at the address the server actually listens on, not the default.
