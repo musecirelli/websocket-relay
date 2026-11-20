@@ -23,6 +23,12 @@ import (
 // the server was started with a non-default -port.
 const defaultWSAddr = "127.0.0.1:8765"
 
+// toolVersionPlaceholder sits in the snippet where the Relay Tool
+// version belongs; the GUI stamps in the version this server
+// actually serves (RelayToolVersion), so the snippet knows which
+// versioned tool it is asking for.
+const toolVersionPlaceholder = "__RELAY_TOOL_VERSION__"
+
 // startGUI starts the GUI listener on host with a random port and
 // returns its URL, e.g. "http://127.0.0.1:51234".
 func startGUI(host, wsAddr string) (string, error) {
@@ -51,10 +57,12 @@ func (g *gui) page(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// The GUI hands out the Closure-compiled snippet; only the live
-	// listen address is rewritten into it (the default address is a
-	// string literal and survives compilation untouched).
+	// The GUI hands out the Closure-compiled snippet with two
+	// serve-time rewrites (both are string literals and survive
+	// compilation untouched): the live listen address, and the
+	// Relay Tool version this server serves.
 	snippet := strings.ReplaceAll(relay.ClientSnippetMin, defaultWSAddr, g.wsAddr)
+	snippet = strings.ReplaceAll(snippet, toolVersionPlaceholder, RelayToolVersion)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := guiPage.Execute(w, map[string]string{
 		"WSAddr":  g.wsAddr,

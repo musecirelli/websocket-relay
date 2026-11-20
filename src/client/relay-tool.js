@@ -1,14 +1,22 @@
 /**
- * Comms Shim — Relay Tool v0.1.0
+ * Comms Shim — Relay Tool v0.2.0
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
  * components — vanilla JS/HTML/CSS, no frameworks.
  *
- * Components:
- *   <relay-tool>           the floating window (drag, resize, close)
- *   <relay-function-list>  left panel: the available functions
- *   <relay-echo-panel>     the echo function panel (right side)
+ * Components (tag names carry the version — see below):
+ *   <relay-tool-v0-2-0>           the floating window (drag, resize, close)
+ *   <relay-function-list-v0-2-0>  left panel: the available functions
+ *   <relay-echo-panel-v0-2-0>     the echo function panel (right side)
+ *
+ * Versioned tags: a custom element name can only ever be defined
+ * once per page, so the tag names are suffixed with the tool
+ * version (relay-tool-v0-2-0). Different versions of the tool can
+ * be dropped onto the same page without colliding; every tag
+ * lookup in this file is computed from VERSION via tag(). There
+ * is deliberately no catch-and-retry on define() — if you need a
+ * clean slate, refresh the page.
  *
  * Communication follows the project UI rules: components talk via
  * custom elements, data- attributes, and CustomEvents; animations
@@ -19,13 +27,20 @@
  * and is deliberately NOT a registry entry.
  */
 (() => {
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
 
-  // Already loaded? The tool is a singleton on the page.
-  if (window.CommsShim?.toolVersion) return;
+  // This exact version already loaded? Then there is nothing to
+  // do — the same code is already registered under the same tags.
+  // (A *different* version is fine: it registers its own tags.)
+  window.CommsShimTools ??= {};
+  if (window.CommsShimTools[VERSION]) return;
+
+  // Version-suffixed tag names: tag('relay-tool') -> 'relay-tool-v0-2-0'.
+  const tagSuffix = `-v${VERSION.replaceAll('.', '-')}`;
+  const tag = (base) => base + tagSuffix;
 
   const FUNCTIONS = [
-    { id: 'echo', label: 'Echo', tag: 'relay-echo-panel' },
+    { id: 'echo', label: 'Echo', tag: 'relay-echo-panel' }, // base tag; tag() adds the version
   ];
 
   const panelCSS = `
@@ -39,7 +54,7 @@
   `;
 
   // ----------------------------------------------------------------
-  // <relay-function-list> — left panel listing the functions.
+  // <relay-function-list-vX-Y-Z> — left panel listing the functions.
   // Clicking an item marks it active (aria-selected + CSS) and fires
   // a relay-function-select CustomEvent; <relay-tool> listens and
   // swaps the right-hand panel.
@@ -93,7 +108,7 @@
   }
 
   // ----------------------------------------------------------------
-  // <relay-echo-panel> — the echo function: a text field, a Send
+  // <relay-echo-panel-vX-Y-Z> — the echo function: a text field, a Send
   // button, and a readonly log; every echo is appended to the log.
   // Talks to localhostServer through the snippet's shared WsRpc
   // (window.CommsShim.rpc).
@@ -152,7 +167,7 @@
   }
 
   // ----------------------------------------------------------------
-  // <relay-tool> — the floating window. Drag by the header
+  // <relay-tool-vX-Y-Z> — the floating window. Drag by the header
   // (pointer events), resize by the corner (pure CSS resize),
   // close with the × button. Hosts the function list on the left
   // and the active function's panel on the right; the active
@@ -161,11 +176,16 @@
   class RelayTool extends HTMLElement {
     constructor() {
       super();
+      // A custom element constructor must not add attributes or
+      // children to the element — createElement throws
+      // NotSupportedError ("The result must not have attributes").
+      // attachShadow is allowed; everything else goes in
+      // connectedCallback.
       this.attachShadow({ mode: 'open' });
-      this.dataset.version = VERSION;
     }
 
     connectedCallback() {
+      this.dataset.version = VERSION;
       this.shadowRoot.innerHTML = `
         <style>
           :host { position: fixed; top: 16px; right: 16px; z-index: 2147483000;
@@ -193,7 +213,7 @@
           header button { border: none; background: none; font: inherit;
                           cursor: pointer; padding: 0 0.3rem; }
           main { flex: 1; display: flex; min-height: 0; }
-          relay-function-list { width: 150px; flex: none; }
+          ${tag('relay-function-list')} { width: 150px; flex: none; }
           .host { flex: 1; min-width: 0; }
         </style>
         <div class="window">
@@ -204,12 +224,12 @@
                     aria-label="Close">✕</button>
           </header>
           <main>
-            <relay-function-list></relay-function-list>
+            <${tag('relay-function-list')}></${tag('relay-function-list')}>
             <div class="host" part="panel-host"></div>
           </main>
         </div>`;
 
-      this._list = this.shadowRoot.querySelector('relay-function-list');
+      this._list = this.shadowRoot.querySelector(tag('relay-function-list'));
       this._host = this.shadowRoot.querySelector('.host');
       this._window = this.shadowRoot.querySelector('.window');
 
@@ -229,7 +249,7 @@
       if (!fn) return;
       this.dataset.activeFunction = id;
       this._list.select(id);
-      this._host.replaceChildren(document.createElement(fn.tag));
+      this._host.replaceChildren(document.createElement(tag(fn.tag)));
     }
 
     _dragSetup(handle) {
@@ -257,13 +277,21 @@
     }
   }
 
-  customElements.define('relay-function-list', RelayFunctionList);
-  customElements.define('relay-echo-panel', RelayEchoPanel);
-  customElements.define('relay-tool', RelayTool);
+  // Plain defines: the versioned names cannot collide with a
+  // different version, and the same version returned early above.
+  customElements.define(tag('relay-function-list'), RelayFunctionList);
+  customElements.define(tag('relay-echo-panel'), RelayEchoPanel);
+  customElements.define(tag('relay-tool'), RelayTool);
 
-  document.body.appendChild(document.createElement('relay-tool'));
-  if (window.CommsShim) window.CommsShim.toolVersion = VERSION;
-  window.dispatchEvent(new CustomEvent('comms-shim:tool-ready', {
-    detail: { version: VERSION },
-  }));
+  try {
+    const host = document.body ?? document.documentElement;
+    host.appendChild(document.createElement(tag('relay-tool')));
+    window.CommsShimTools[VERSION] = { tagSuffix };
+    if (window.CommsShim) window.CommsShim.toolVersion = VERSION;
+    window.dispatchEvent(new CustomEvent('comms-shim:tool-ready', {
+      detail: { version: VERSION },
+    }));
+  } catch (e) {
+    console.error('[Comms Shim] Relay Tool failed to start:', e);
+  }
 })();
