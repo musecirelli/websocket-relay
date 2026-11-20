@@ -1,18 +1,19 @@
 /**
- * Comms Shim — Relay Tool v0.2.0
+ * Comms Shim — Relay Tool v0.3.0
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
  * components — vanilla JS/HTML/CSS, no frameworks.
  *
  * Components (tag names carry the version — see below):
- *   <relay-tool-v0-2-0>           the floating window (drag, resize, close)
- *   <relay-function-list-v0-2-0>  left panel: the available functions
- *   <relay-echo-panel-v0-2-0>     the echo function panel (right side)
+ *   <relay-tool-v0-3-0>           the floating window (drag, resize, close)
+ *   <relay-function-list-v0-3-0>  left panel: the available functions
+ *   <relay-echo-panel-v0-3-0>     the echo function panel (right side)
+ *   <relay-chat-panel-v0-3-0>     the chat function panel (Remote Server relay)
  *
  * Versioned tags: a custom element name can only ever be defined
  * once per page, so the tag names are suffixed with the tool
- * version (relay-tool-v0-2-0). Different versions of the tool can
+ * version (relay-tool-v0-3-0). Different versions of the tool can
  * be dropped onto the same page without colliding; every tag
  * lookup in this file is computed from VERSION via tag(). There
  * is deliberately no catch-and-retry on define() — if you need a
@@ -27,7 +28,7 @@
  * and is deliberately NOT a registry entry.
  */
 (() => {
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
 
   // This exact version already loaded? Then there is nothing to
   // do — the same code is already registered under the same tags.
@@ -41,6 +42,7 @@
 
   const FUNCTIONS = [
     { id: 'echo', label: 'Echo', tag: 'relay-echo-panel' }, // base tag; tag() adds the version
+    { id: 'chat', label: 'Chat', tag: 'relay-chat-panel' },
   ];
 
   const panelCSS = `
@@ -167,6 +169,225 @@
   }
 
   // ----------------------------------------------------------------
+  // <relay-chat-panel-vX-Y-Z> — the Chat function: relay messages
+  // through localhostServer to a Remote Server.
+  //
+  // Layout (top to bottom): an address row (URL/IP + port input, a
+  // connect button with a link icon, and a status light — red
+  // disconnected, yellow connecting, green connected; all CSS off
+  // the container's data-state), an IRC-style message log, and a
+  // composer (text input + Send button).
+  //
+  // Talks JSON-RPC to localhostServer: relay.connect /
+  // relay.disconnect / relay.send / relay.status, and subscribes
+  // to the relay.message / relay.status notifications the server
+  // pushes when the Remote Server says something or goes away.
+  // The relay belongs to the WebSocket session, not to this panel:
+  // switching functions keeps the connection, and a fresh panel
+  // syncs its state via relay.status.
+  // ----------------------------------------------------------------
+  class RelayChatPanel extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+      this._unsubscribe = [];
+      this._state = 'disconnected';
+    }
+
+    connectedCallback() {
+      this.shadowRoot.innerHTML = `
+        <style>
+          ${panelCSS}
+          .chat { display: flex; flex-direction: column; height: 100%;
+                  box-sizing: border-box; gap: 0.5rem; }
+          .top { display: flex; align-items: center; gap: 0.4rem; }
+          .top input { flex: 1; min-width: 0; padding: 0.4rem; font: inherit;
+                       font-family: ui-monospace, Menlo, monospace;
+                       font-size: 0.85rem; }
+          .connect { display: inline-flex; align-items: center; gap: 0.35rem;
+                     padding: 0.4rem 0.6rem; font: inherit; cursor: pointer; }
+          .connect svg { width: 14px; height: 14px; flex: none; }
+          .connect .label-disconnect { display: none; }
+          .chat[data-state="connected"] .connect .label-connect { display: none; }
+          .chat[data-state="connected"] .connect .label-disconnect { display: inline; }
+          .light { width: 11px; height: 11px; border-radius: 50%; flex: none;
+                   background: #d64545;
+                   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset; }
+          .chat[data-state="connecting"] .light { background: #e3a008;
+                   animation: pulse 900ms ease-in-out infinite; }
+          .chat[data-state="connected"] .light { background: #2da44e; }
+          @keyframes pulse { 50% { opacity: 0.35; } }
+          .log { flex: 1; overflow-y: auto; min-height: 0;
+                 border: 1px solid var(--rt-border, #ddd); border-radius: 6px;
+                 padding: 0.5rem;
+                 font-family: ui-monospace, Menlo, monospace;
+                 font-size: 0.82rem; }
+          .line { margin-bottom: 0.25rem; overflow-wrap: anywhere; }
+          .line .from { font-weight: 700; }
+          .line.sys { color: var(--rt-muted, #777); font-style: italic; }
+          .line.err { color: #b3261e; }
+          .composer { display: flex; gap: 0.4rem; }
+          .composer input { flex: 1; min-width: 0; padding: 0.4rem; font: inherit; }
+          .composer button { padding: 0.4rem 0.9rem; font: inherit;
+                             cursor: pointer; }
+        </style>
+        <div class="chat panel" data-state="disconnected">
+          <form class="top">
+            <input name="address"
+                   placeholder="host:port — e.g. 192.168.1.20:9000"
+                   autocomplete="off" spellcheck="false">
+            <button class="connect" type="submit" title="Connect / disconnect">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" aria-hidden="true">
+                <path d="M6.5 9.5a3 3 0 0 0 4.2 0l2-2a3 3 0 1 0-4.2-4.2l-1 1"/>
+                <path d="M9.5 6.5a3 3 0 0 0-4.2 0l-2 2a3 3 0 1 0 4.2 4.2l1-1"/>
+              </svg>
+              <span class="label-connect">Connect</span>
+              <span class="label-disconnect">Disconnect</span>
+            </button>
+            <span class="light" role="status" aria-label="Not connected"></span>
+          </form>
+          <div class="log" aria-live="polite"></div>
+          <form class="composer">
+            <input name="text" placeholder="Message…" autocomplete="off">
+            <button type="submit">Send</button>
+          </form>
+        </div>`;
+
+      this._root = this.shadowRoot.querySelector('.chat');
+      this._logEl = this.shadowRoot.querySelector('.log');
+      this._addr = this.shadowRoot.querySelector('input[name="address"]');
+      this._text = this.shadowRoot.querySelector('input[name="text"]');
+      this._light = this.shadowRoot.querySelector('.light');
+
+      this.shadowRoot.querySelector('.top').addEventListener('submit', (e) => {
+        e.preventDefault();
+        this._toggleConnect();
+      });
+      this.shadowRoot.querySelector('.composer')
+        .addEventListener('submit', (e) => {
+          e.preventDefault();
+          this._send();
+        });
+
+      const rpc = window.CommsShim?.rpc;
+      if (rpc?.onNotification) {
+        this._unsubscribe.push(rpc.onNotification('relay.message', (p) => {
+          this._appendLine('', p?.from || 'remote', p?.text ?? '');
+        }));
+        this._unsubscribe.push(rpc.onNotification('relay.status', (p) => {
+          if (p?.state === 'disconnected' && this._state === 'connected') {
+            this._setState('disconnected');
+            this._appendLine('sys', '', 'Remote Server disconnected');
+          }
+        }));
+        // Sync with the session's real relay state.
+        rpc.call('relay.status').then((s) => {
+          if (s?.state === 'connected') {
+            this._setState('connected');
+            this._appendLine('sys', '', `Connected to ${s.remote}`);
+          }
+        }).catch(() => {});
+      } else {
+        this._appendLine('err', '', 'Not connected to localhostServer');
+      }
+      this._addr.focus();
+    }
+
+    disconnectedCallback() {
+      this._unsubscribe.forEach((u) => u());
+      this._unsubscribe = [];
+    }
+
+    _setState(state) {
+      this._state = state;
+      this._root.dataset.state = state;
+      this._addr.disabled = state !== 'disconnected';
+      this._light.setAttribute('aria-label', {
+        disconnected: 'Not connected',
+        connecting: 'Connecting…',
+        connected: 'Connected',
+      }[state]);
+    }
+
+    /** "https://example.com:9000/x" / "192.168.1.20" -> {host, port}. */
+    _parseAddress(raw) {
+      const s = String(raw || '').trim()
+        .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '') // strip scheme
+        .split('/')[0];
+      const i = s.lastIndexOf(':');
+      if (i > 0) {
+        const port = Number.parseInt(s.slice(i + 1), 10);
+        return { host: s.slice(0, i), port: Number.isNaN(port) ? 9000 : port };
+      }
+      return { host: s, port: 9000 };
+    }
+
+    async _toggleConnect() {
+      const rpc = window.CommsShim?.rpc;
+      if (!rpc) {
+        this._appendLine('err', '', 'Not connected to localhostServer');
+        return;
+      }
+      if (this._state === 'connected') {
+        try { await rpc.call('relay.disconnect'); } catch { /* already gone */ }
+        this._setState('disconnected');
+        this._appendLine('sys', '', 'Disconnected');
+        return;
+      }
+      if (this._state === 'connecting') return;
+      const { host, port } = this._parseAddress(this._addr.value);
+      if (!host) {
+        this._appendLine('err', '', 'Enter a host (URL or IP) to connect to');
+        return;
+      }
+      this._setState('connecting');
+      try {
+        const result = await rpc.call('relay.connect', { host, port });
+        this._setState('connected');
+        this._appendLine('sys', '',
+          `Connected to ${result?.remote ?? `${host}:${port}`}`);
+        this._text.focus();
+      } catch (err) {
+        this._setState('disconnected');
+        this._appendLine('err', '', err.message || String(err));
+      }
+    }
+
+    async _send() {
+      const text = this._text.value;
+      if (!text) return;
+      if (this._state !== 'connected') {
+        this._appendLine('err', '',
+          'Not connected — connect to a Remote Server first');
+        return;
+      }
+      try {
+        await window.CommsShim.rpc.call('relay.send', { text });
+        this._appendLine('me', 'me', text);
+        this._text.value = '';
+      } catch (err) {
+        this._appendLine('err', '', err.message || String(err));
+      }
+    }
+
+    _appendLine(kind, from, text) {
+      const line = document.createElement('div');
+      line.className = `line ${kind}`.trim();
+      if (kind === 'sys' || kind === 'err') {
+        line.textContent = text;
+      } else {
+        const who = document.createElement('span');
+        who.className = 'from';
+        who.textContent = `${from}: `;
+        line.append(who, document.createTextNode(String(text)));
+      }
+      this._logEl.appendChild(line);
+      this._logEl.scrollTop = this._logEl.scrollHeight;
+    }
+  }
+
+  // ----------------------------------------------------------------
   // <relay-tool-vX-Y-Z> — the floating window. Drag by the header
   // (pointer events), resize by the corner (pure CSS resize),
   // close with the × button. Hosts the function list on the left
@@ -281,6 +502,7 @@
   // different version, and the same version returned early above.
   customElements.define(tag('relay-function-list'), RelayFunctionList);
   customElements.define(tag('relay-echo-panel'), RelayEchoPanel);
+  customElements.define(tag('relay-chat-panel'), RelayChatPanel);
   customElements.define(tag('relay-tool'), RelayTool);
 
   try {

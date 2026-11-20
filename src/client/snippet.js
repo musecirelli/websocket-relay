@@ -24,6 +24,7 @@ class WsRpc {
     this.ws = null;
     this._nextId = 1;
     this._pending = new Map(); // id -> {resolve, reject}
+    this._notifyHandlers = new Map(); // method -> Set<handler>
   }
 
   connect() {
@@ -46,6 +47,17 @@ class WsRpc {
     try { msg = JSON.parse(data); } catch { return; }
     const responses = Array.isArray(msg) ? msg : [msg];
     for (const res of responses) {
+      if (res.method) {
+        // A notification from the server (method, no id): fan out
+        // to subscribers. One bad handler must not break the rest.
+        const handlers = this._notifyHandlers.get(res.method);
+        if (handlers) {
+          handlers.forEach((h) => {
+            try { h(res.params); } catch { /* keep going */ }
+          });
+        }
+        continue;
+      }
       const pending = this._pending.get(res.id);
       if (!pending) continue;
       this._pending.delete(res.id);
@@ -76,6 +88,21 @@ class WsRpc {
   /** Fire-and-forget JSON-RPC notification (no id, no response). */
   notify(method, params) {
     this.ws?.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  }
+
+  /**
+   * Subscribe to notifications the server pushes (messages with a
+   * method and no id), e.g. "relay.message" from the Chat relay.
+   * Returns an unsubscribe function.
+   */
+  onNotification(method, handler) {
+    let set = this._notifyHandlers.get(method);
+    if (!set) {
+      set = new Set();
+      this._notifyHandlers.set(method, set);
+    }
+    set.add(handler);
+    return () => set.delete(handler);
   }
 
   close() {

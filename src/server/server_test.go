@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ import (
 
 func startTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(buildMux(buildDispatcher()))
+	srv := httptest.NewServer(buildMux())
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -242,4 +243,89 @@ func TestGUIServesSnippetForLiveAddress(t *testing.T) {
 	assert.Contains(t, page, "ws://127.0.0.1:9000")
 	assert.NotContains(t, page, "8765",
 		"snippet default address must be rewritten to the live address")
+}
+
+// --- Chat relay: fake Remote Server + end-to-end flow -----------------------
+
+// startFakeRemote listens on a random port and answers every chat
+// message with "re: <text>", like the real Remote Server's operator
+// would — but deterministic, for tests.
+func startFakeRemote(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			var m remoteMessage
+			if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
+				continue
+			}
+			if m.Type == "msg" {
+				reply, _ := json.Marshal(remoteMessage{
+					Type: "msg", From: "remote", Text: "re: " + m.Text,
+				})
+				conn.Write(append(reply, '\n'))
+			}
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestRelayChatEndToEnd(t *testing.T) {
+	remotePort := startFakeRemote(t)
+	c := dialWS(t, startTestServer(t))
+
+	// Send before connecting is an error.
+	resp := call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.send",
+		Params: json.RawMessage(`{"text":"too early"}`), ID: 1})
+	require.NotNil(t, resp.Error, "relay.send before connect must fail")
+
+	// Connect to a dead port is an error too.
+	resp = call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.connect",
+		Params: json.RawMessage(`{"host":"127.0.0.1","port":1}`), ID: 2})
+	require.NotNil(t, resp.Error, "relay.connect to a dead port must fail")
+
+	resp = call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.connect",
+		Params: json.RawMessage(fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, remotePort)), ID: 3})
+	require.Nil(t, resp.Error)
+	assert.Contains(t, string(resp.Result), "127.0.0.1")
+
+	resp = call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.status", ID: 4})
+	require.Nil(t, resp.Error)
+	assert.Contains(t, string(resp.Result), `"connected"`)
+
+	resp = call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.send",
+		Params: json.RawMessage(`{"text":"hello remote"}`), ID: 5})
+	require.Nil(t, resp.Error)
+
+	// The fake remote's reply must arrive as a relay.message
+	// notification (it may interleave with nothing else here).
+	require.NoError(t, c.conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	for {
+		raw, err := c.readText()
+		require.NoError(t, err, "waiting for the relay.message notification")
+		var notif struct {
+			Method string `json:"method"`
+			Params struct {
+				From string `json:"from"`
+				Text string `json:"text"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &notif); err == nil && notif.Method == "relay.message" {
+			assert.Equal(t, "remote", notif.Params.From)
+			assert.Equal(t, "re: hello remote", notif.Params.Text)
+			break
+		}
+	}
+
+	resp = call(t, c, rpcRequestMsg{JSONRPC: "2.0", Method: "relay.disconnect", ID: 6})
+	require.Nil(t, resp.Error)
+	assert.Equal(t, `"ok"`, string(resp.Result))
 }

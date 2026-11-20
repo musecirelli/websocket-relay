@@ -13,6 +13,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -25,9 +26,8 @@ func main() {
 	port := flag.Int("port", 8765, "listen port")
 	flag.Parse()
 
-	dispatcher := buildDispatcher()
 	addr := fmt.Sprintf("%s:%d", *host, *port)
-	mux := buildMux(dispatcher)
+	mux := buildMux()
 
 	guiURL, err := startGUI(*host, addr)
 	if err != nil {
@@ -39,9 +39,47 @@ func main() {
 	fmt.Println("Comms Shim — localhostServer")
 	fmt.Printf("  WebSocket (JSON-RPC 2.0): ws://%s\n", addr)
 	fmt.Printf("  GUI: %s\n", guiURL)
-	fmt.Printf("  methods: %s\n", strings.Join(dispatcher.Methods(), ", "))
+	fmt.Printf("  methods: %s\n", strings.Join(buildSessionDispatcher(newSession(nil)).Methods(), ", "))
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// session is one browser's WebSocket connection: its dispatcher
+// (with the relay methods bound to its own relay connection) and
+// its outbound notification channel back to the browser.
+type session struct {
+	ws    *wsConn
+	relay *relayClient
+}
+
+func newSession(ws *wsConn) *session {
+	s := &session{ws: ws, relay: &relayClient{}}
+	s.relay.notify = s.notify
+	return s
+}
+
+// notify pushes a JSON-RPC notification (no id) to the browser.
+// Safe to call from any goroutine; wsConn serializes frame writes.
+func (s *session) notify(method string, params any) {
+	if s.ws == nil {
+		return
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return
+	}
+	frame, err := json.Marshal(struct {
+		JSONRPC string          `json:"jsonrpc"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}{"2.0", method, paramsJSON})
+	if err != nil {
+		return
+	}
+	log.Printf("[rpc] notify %s", string(frame))
+	if err := s.ws.writeFrame(opText, frame); err != nil {
+		log.Printf("[ws] notify write error: %v", err)
 	}
 }
 
@@ -49,10 +87,10 @@ func main() {
 // WebSocket endpoint itself, /health, and /relay-tool.js (the Relay
 // Tool the snippet loads). Extracted from main so tests can serve
 // the real handler (see server_test.go).
-func buildMux(dispatcher *Dispatcher) *http.ServeMux {
+func buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		serveWS(w, r, dispatcher)
+		serveWS(w, r)
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -62,13 +100,20 @@ func buildMux(dispatcher *Dispatcher) *http.ServeMux {
 	return mux
 }
 
-func serveWS(w http.ResponseWriter, r *http.Request, dispatcher *Dispatcher) {
+func serveWS(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrade(w, r)
 	if err != nil {
 		log.Printf("[ws] upgrade failed from %s: %v", r.RemoteAddr, err)
 		return
 	}
-	defer ws.close()
+	// One session per browser connection: its own dispatcher, with
+	// the relay methods bound to its own Remote Server connection.
+	sess := newSession(ws)
+	dispatcher := buildSessionDispatcher(sess)
+	defer func() {
+		sess.relay.disconnect()
+		ws.close()
+	}()
 	log.Printf("[ws] connect %s", r.RemoteAddr)
 
 	// Accumulate fragmented messages until a final text/binary frame.
