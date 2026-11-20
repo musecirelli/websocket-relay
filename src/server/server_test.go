@@ -235,6 +235,10 @@ func TestGUIServesSnippetForLiveAddress(t *testing.T) {
 	page := string(body)
 	assert.Contains(t, page, "developer console")
 	assert.Contains(t, page, "wsEcho", "page must contain the client snippet")
+	assert.Contains(t, page, RelayToolVersion,
+		"snippet must be stamped with the served Relay Tool version")
+	assert.NotContains(t, page, "__RELAY_TOOL_VERSION__",
+		"the version placeholder must be rewritten at serve time")
 	assert.Contains(t, page, "ws://127.0.0.1:9000")
 	assert.NotContains(t, page, "8765",
 		"snippet default address must be rewritten to the live address")

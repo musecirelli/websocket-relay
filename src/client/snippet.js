@@ -94,6 +94,12 @@ const CommsShim = {
   serverUrl: 'ws://127.0.0.1:8765',
   rpc: null,         // shared WsRpc, set by connect()
   toolVersion: null, // set by the Relay Tool when it loads
+  // The Relay Tool version this snippet was served with — the GUI
+  // stamps it in at serve time (the placeholder below is replaced,
+  // like the address). The tool registers its components under
+  // tag names suffixed with its version, so versions can coexist
+  // on a page; this tells the snippet which one it asked for.
+  expectedToolVersion: '__RELAY_TOOL_VERSION__',
 
   /** HTTP base of localhostServer (ws:// -> http://). */
   get httpBase() {
@@ -126,10 +132,16 @@ const CommsShim = {
 
   /** Ask localhostServer for the Relay Tool and show it. */
   async loadRelayTool() {
-    if (this.toolVersion) return; // already loaded — stay a no-op
+    const expected = this.expectedToolVersion;
+    if (window.CommsShimTools?.[expected]) return; // our version is up
     await this.loadScript(`${this.httpBase}/relay-tool.js`);
-    if (!this.toolVersion) {
+    if (!window.CommsShimTools?.[expected] && !this.toolVersion) {
       throw new Error('Relay Tool loaded but did not start (see console)');
+    }
+    if (this.toolVersion && /^\d+\.\d+\.\d+$/.test(expected)
+        && this.toolVersion !== expected) {
+      console.warn(`[Comms Shim] snippet expected Relay Tool v${expected}, `
+        + `server served v${this.toolVersion} — using the served version`);
     }
   },
 

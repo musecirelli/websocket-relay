@@ -133,6 +133,15 @@ header). The client snippet — itself just a loader — fetches and
 evaluates it; the loader is infrastructure and is not one of the
 tool's functions.
 
+The tool's tag names are **version-suffixed** (`relay-tool-v0-2-0`,
+`relay-echo-panel-v0-2-0`, …): a custom element name can only be
+defined once per page, so versioning the names lets different tool
+versions coexist on one page without colliding — every tag lookup
+in the tool is computed from its version. The GUI stamps the
+expected version into the snippet it serves (same serve-time
+rewrite as the server address). There is no retry/increment
+machinery: refresh the page for a clean slate.
+
 Components (all vanilla custom elements; communication via custom
 elements, `data-` attributes, and CustomEvents; animations in CSS):
 
