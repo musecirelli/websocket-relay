@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 )
 
 // Minimal WebSocket (RFC 6455) transport on the standard library only.
@@ -37,6 +38,10 @@ func computeAccept(key string) string {
 type wsConn struct {
 	conn net.Conn
 	r    *bufio.Reader
+	// wmu serializes frame writes: RPC responses are written by the
+	// read loop while server notifications (relay messages) are
+	// written by other goroutines.
+	wmu sync.Mutex
 }
 
 func upgrade(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
@@ -115,6 +120,8 @@ func (c *wsConn) readFrame() (opcode int, payload []byte, err error) {
 }
 
 func (c *wsConn) writeFrame(opcode int, payload []byte) error {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	var header []byte
 	header = append(header, byte(0x80|opcode))
 	switch {
