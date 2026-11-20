@@ -5,10 +5,12 @@ go = "1.27.4"
 # node + Closure Compiler are build-time only: they compile the
 # client snippet (see the build-snippet task). The server itself
 # needs nothing but Go. The Closure npm package runs its Java
-# build, which needs Java 21+ — pinned here so every machine
-# gets a new enough JDK from mise alone.
+# build, which needs Java 21+. Java is pinned by major version
+# only: the exact Temurin build strings differ between mise
+# versions (21.0.13+9.0.LTS on newer mise is unknown to older
+# mise), and any 21.x JDK runs the compiler identically.
 node = "22.23.5"
-java = "21.0.13+9.0.LTS"
+java = "21"
 "npm:google-closure-compiler" = "20261117.0.0"
 
 # Compile the drop-in client snippet with Google Closure Compiler.
