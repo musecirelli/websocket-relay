@@ -217,7 +217,7 @@ per method lookup, O(n) in message size.
       client snippet to drop into the dev console
 - [x] Snippet compiled with Closure Compiler (mise task); GUI hands
       out the minified form
-- [x] Relay Tool v0.1.0: versioned web-components window served by
+- [x] Relay Tool (versioned): web-components window served by
       localhostServer, loaded by the snippet; Echo panel
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)

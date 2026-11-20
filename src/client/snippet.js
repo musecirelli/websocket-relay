@@ -126,7 +126,11 @@ const CommsShim = {
 
   /** Ask localhostServer for the Relay Tool and show it. */
   async loadRelayTool() {
+    if (this.toolVersion) return; // already loaded — stay a no-op
     await this.loadScript(`${this.httpBase}/relay-tool.js`);
+    if (!this.toolVersion) {
+      throw new Error('Relay Tool loaded but did not start (see console)');
+    }
   },
 
   /** Connect, then load the Relay Tool. Runs automatically below. */

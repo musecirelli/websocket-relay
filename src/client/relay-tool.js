@@ -1,5 +1,5 @@
 /**
- * Comms Shim — Relay Tool v0.1.0
+ * Comms Shim — Relay Tool v0.1.1
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
@@ -19,7 +19,7 @@
  * and is deliberately NOT a registry entry.
  */
 (() => {
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
 
   // Already loaded? The tool is a singleton on the page.
   if (window.CommsShim?.toolVersion) return;
@@ -161,11 +161,16 @@
   class RelayTool extends HTMLElement {
     constructor() {
       super();
+      // A custom element constructor must not add attributes or
+      // children to the element — createElement throws
+      // NotSupportedError ("The result must not have attributes").
+      // attachShadow is allowed; everything else goes in
+      // connectedCallback.
       this.attachShadow({ mode: 'open' });
-      this.dataset.version = VERSION;
     }
 
     connectedCallback() {
+      this.dataset.version = VERSION;
       this.shadowRoot.innerHTML = `
         <style>
           :host { position: fixed; top: 16px; right: 16px; z-index: 2147483000;
@@ -257,13 +262,24 @@
     }
   }
 
-  customElements.define('relay-function-list', RelayFunctionList);
-  customElements.define('relay-echo-panel', RelayEchoPanel);
-  customElements.define('relay-tool', RelayTool);
+  // Idempotent: re-loading this script (e.g. the snippet pasted
+  // twice, or pasted again after the tool was closed) must not
+  // throw "already defined".
+  const define = (name, cls) => {
+    if (!customElements.get(name)) customElements.define(name, cls);
+  };
+  define('relay-function-list', RelayFunctionList);
+  define('relay-echo-panel', RelayEchoPanel);
+  define('relay-tool', RelayTool);
 
-  document.body.appendChild(document.createElement('relay-tool'));
-  if (window.CommsShim) window.CommsShim.toolVersion = VERSION;
-  window.dispatchEvent(new CustomEvent('comms-shim:tool-ready', {
-    detail: { version: VERSION },
-  }));
+  try {
+    const host = document.body ?? document.documentElement;
+    host.appendChild(document.createElement('relay-tool'));
+    if (window.CommsShim) window.CommsShim.toolVersion = VERSION;
+    window.dispatchEvent(new CustomEvent('comms-shim:tool-ready', {
+      detail: { version: VERSION },
+    }));
+  } catch (e) {
+    console.error('[Comms Shim] Relay Tool failed to start:', e);
+  }
 })();
