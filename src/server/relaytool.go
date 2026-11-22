@@ -1,9 +1,9 @@
 // relaytool.go — serves the Relay Tool, the versioned web-components
 // app the client snippet loads into a page.
 //
-// The tool is served from the WebSocket port (same mux as /health)
-// because that is the only address the snippet knows: it derives
-// this URL from its WebSocket URL by swapping ws:// for http://.
+// The tool is served from localhostServer's HTTP asset port (same
+// mux as /health and /mqtt.min.js); the snippet is stamped with
+// that base address by the GUI (see gui.go).
 package main
 
 import (
@@ -16,7 +16,7 @@ import (
 // Bump it whenever client/relay-tool.js changes; the version is
 // sent in the X-Relay-Tool-Version header and shown in the tool's
 // header. Keep it in step with VERSION in client/relay-tool.js.
-const RelayToolVersion = "0.3.0"
+const RelayToolVersion = "0.4.0"
 
 // relayToolHandler serves the Relay Tool JavaScript.
 func relayToolHandler(w http.ResponseWriter, r *http.Request) {

@@ -29,3 +29,12 @@ var ClientSnippetMin string
 //
 //go:embed client/relay-tool.js
 var RelayToolJS string
+
+// MQTTJS is the vendored MQTT.js browser build (v5.16.1, MIT,
+// https://github.com/mqttjs/MQTT.js), served by localhostServer at
+// GET /mqtt.min.js. The snippet loads MQTT.js from a CDN first and
+// falls back to this copy, so the vendored file only needs to
+// exist and be a working build, not be rebuilt by make.
+//
+//go:embed client/mqtt.min.js
+var MQTTJS string

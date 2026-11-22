@@ -17,26 +17,28 @@ import (
 	relay "websocket-relay"
 )
 
-// defaultWSAddr is the address baked into client/snippet.js as the
-// default. The GUI rewrites it to the address localhostServer is
-// actually listening on, so a copied snippet works as-is even when
-// the server was started with a non-default -port.
-const defaultWSAddr = "127.0.0.1:8765"
+// Placeholders baked into client/snippet.js; the GUI stamps in
+// the live values, so a copied snippet works as-is even when the
+// server was started with non-default ports. All three are string
+// literals in the snippet and survive Closure compilation.
+const (
+	brokerPlaceholder = "__BROKER_URL__" // MQTT-over-WebSocket broker URL
+	assetPlaceholder  = "__ASSET_BASE__" // HTTP base for /relay-tool.js, /mqtt.min.js
 
-// toolVersionPlaceholder sits in the snippet where the Relay Tool
-// version belongs; the GUI stamps in the version this server
-// actually serves (RelayToolVersion), so the snippet knows which
-// versioned tool it is asking for.
-const toolVersionPlaceholder = "__RELAY_TOOL_VERSION__"
+	// toolVersionPlaceholder: the Relay Tool version this server
+	// actually serves (RelayToolVersion), so the snippet knows
+	// which versioned tool it is asking for.
+	toolVersionPlaceholder = "__RELAY_TOOL_VERSION__"
+)
 
 // startGUI starts the GUI listener on host with a random port and
 // returns its URL, e.g. "http://127.0.0.1:51234".
-func startGUI(host, wsAddr string) (string, error) {
+func startGUI(host, brokerURL, assetBase string) (string, error) {
 	ln, err := net.Listen("tcp", host+":0")
 	if err != nil {
 		return "", err
 	}
-	g := &gui{wsAddr: wsAddr}
+	g := &gui{brokerURL: brokerURL, assetBase: assetBase}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", g.page)
 	go func() {
@@ -48,7 +50,8 @@ func startGUI(host, wsAddr string) (string, error) {
 }
 
 type gui struct {
-	wsAddr string // live WebSocket listen address, e.g. "127.0.0.1:8765"
+	brokerURL string // MQTT-over-WebSocket URL, e.g. "ws://127.0.0.1:8083"
+	assetBase string // HTTP asset base, e.g. "http://127.0.0.1:8765"
 }
 
 // page renders the snippet page. Rendering is O(n) in snippet size.
@@ -57,16 +60,17 @@ func (g *gui) page(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// The GUI hands out the Closure-compiled snippet with two
-	// serve-time rewrites (both are string literals and survive
-	// compilation untouched): the live listen address, and the
-	// Relay Tool version this server serves.
-	snippet := strings.ReplaceAll(relay.ClientSnippetMin, defaultWSAddr, g.wsAddr)
+	// The GUI hands out the Closure-compiled snippet with three
+	// serve-time rewrites (all string literals, untouched by
+	// compilation): the broker URL, the asset base, and the Relay
+	// Tool version this server serves.
+	snippet := strings.ReplaceAll(relay.ClientSnippetMin, brokerPlaceholder, g.brokerURL)
+	snippet = strings.ReplaceAll(snippet, assetPlaceholder, g.assetBase)
 	snippet = strings.ReplaceAll(snippet, toolVersionPlaceholder, RelayToolVersion)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := guiPage.Execute(w, map[string]string{
-		"WSAddr":  g.wsAddr,
-		"Snippet": snippet,
+		"BrokerURL": g.brokerURL,
+		"Snippet":   snippet,
 	}); err != nil {
 		log.Printf("[gui] render error: %v", err)
 	}
@@ -88,8 +92,8 @@ var guiPage = template.Must(template.New("gui").Parse(`<!DOCTYPE html>
 </head>
 <body>
 <h1>Comms Shim — localhostServer</h1>
-<p>localhostServer is running. WebSocket (JSON-RPC 2.0):
-   <code class="addr">ws://{{.WSAddr}}</code></p>
+<p>localhostServer is running. MQTT broker (JSON-RPC 2.0 payloads):
+   <code class="addr">{{.BrokerURL}}</code></p>
 
 <h2>Drop this into your developer console</h2>
 <ol>
@@ -97,7 +101,7 @@ var guiPage = template.Must(template.New("gui").Parse(`<!DOCTYPE html>
       (F12, or Cmd+Option+J).</li>
   <li>Copy the snippet below and paste it into the console.</li>
   <li>The <strong>Relay Tool</strong> window appears on the page —
-      pick a function on the left (Echo for now), type, and Send.
+      pick a function on the left (Echo, Chat), type, and Send.
       In the console you can also try
       <code>await wsEcho('hello')</code>.</li>
 </ol>
