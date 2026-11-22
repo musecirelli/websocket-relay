@@ -2,58 +2,94 @@
  * Comms Shim — client snippet (loader).
  *
  * Paste this whole file into a page's developer console (or load it
- * with <script src="snippet.js">). It connects to localhostServer,
- * asks it for the Relay Tool, and the tool window appears on the
- * page. Nothing else to do.
+ * with <script src="snippet.js">). It loads MQTT.js, connects to
+ * localhostServer's MQTT broker, asks it for the Relay Tool, and
+ * the tool window appears on the page. Nothing else to do.
+ *
+ * All traffic is MQTT carrying JSON-RPC 2.0 payloads (see the
+ * mqttx package for the topic conventions):
+ *   requests   -> shim/rpc/<target>/<clientId>
+ *   responses  <- shim/clients/<clientId>/rpc
+ *   chat       -> chat/<username>   (chat.message notifications)
  *
  * What it exposes on window:
  *   CommsShim  — { rpc, loadScript, loadRelayTool, connect,
- *                  serverUrl, toolVersion }
- *   WsRpc      — the JSON-RPC 2.0 client class (used by the tool)
+ *                  brokerUrl, assetBase, clientId, toolVersion }
+ *   MqttRpc    — the JSON-RPC-over-MQTT client class (used by the tool)
  *   wsEcho     — convenience: await wsEcho('hello') -> "hello"
  *
  * The loader (CommsShim.loadScript) is infrastructure: it is not
  * one of the Relay Tool's listed functions.
  *
- * No dependencies. Vanilla JS. Pending-call lookup is O(1);
- * JSON-RPC ids increment monotonically.
+ * MQTT.js is loaded from a CDN, falling back to the copy
+ * localhostServer serves at /mqtt.min.js. Pending-call lookup is
+ * O(1); JSON-RPC ids increment monotonically.
  */
-class WsRpc {
-  constructor(url = 'ws://127.0.0.1:8765') {
-    this.url = url;
-    this.ws = null;
+class MqttRpc {
+  constructor(brokerUrl, clientId) {
+    this.brokerUrl = brokerUrl;
+    this.clientId = clientId;
+    this.client = null; // MQTT.js client
+    this.connected = false;
+    this.chatUser = null;
     this._nextId = 1;
     this._pending = new Map(); // id -> {resolve, reject}
     this._notifyHandlers = new Map(); // method -> Set<handler>
+    this._stateHandlers = new Set(); // (state) => {}
   }
 
+  /** Connect to the broker; resolves on the first connect. */
   connect() {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
-      this.ws.onopen = () => resolve(this);
-      this.ws.onerror = (e) => reject(e);
-      this.ws.onmessage = (event) => this._onMessage(event.data);
-      this.ws.onclose = () => {
-        for (const { reject } of this._pending.values()) {
-          reject(new Error('WebSocket closed'));
-        }
-        this._pending.clear();
-      };
+      let settled = false;
+      this.client = window.mqtt.connect(this.brokerUrl, {
+        clientId: this.clientId,
+        reconnectPeriod: 2000,
+      });
+      this.client.on('connect', () => {
+        this.connected = true;
+        this._emitState('connected');
+        this.client.subscribe(`shim/clients/${this.clientId}/rpc`, (err) => {
+          if (err && !settled) { settled = true; reject(err); }
+          else if (!settled) { settled = true; resolve(this); }
+        });
+      });
+      this.client.on('reconnect', () => this._emitState('connecting'));
+      this.client.on('close', () => {
+        this.connected = false;
+        this._emitState('disconnected');
+      });
+      this.client.on('error', (err) => {
+        if (!settled) { settled = true; reject(err); }
+      });
+      this.client.on('message', (topic, payload) =>
+        this._onMessage(topic, payload.toString()));
     });
   }
 
-  _onMessage(data) {
+  _emitState(state) {
+    this._stateHandlers.forEach((h) => {
+      try { h(state); } catch { /* keep going */ }
+    });
+  }
+
+  /** Subscribe to connection-state changes; returns unsubscribe. */
+  onStateChange(handler) {
+    this._stateHandlers.add(handler);
+    return () => this._stateHandlers.delete(handler);
+  }
+
+  _onMessage(topic, text) {
     let msg;
-    try { msg = JSON.parse(data); } catch { return; }
-    const responses = Array.isArray(msg) ? msg : [msg];
-    for (const res of responses) {
+    try { msg = JSON.parse(text); } catch { return; }
+    const msgs = Array.isArray(msg) ? msg : [msg];
+    for (const res of msgs) {
       if (res.method) {
-        // A notification from the server (method, no id): fan out
-        // to subscribers. One bad handler must not break the rest.
+        // A notification (method, no id): fan out to subscribers.
         const handlers = this._notifyHandlers.get(res.method);
         if (handlers) {
           handlers.forEach((h) => {
-            try { h(res.params); } catch { /* keep going */ }
+            try { h(res.params, topic); } catch { /* keep going */ }
           });
         }
         continue;
@@ -72,27 +108,32 @@ class WsRpc {
     }
   }
 
-  /** Send a JSON-RPC 2.0 request and await its result. */
-  call(method, params) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+  /**
+   * Send a JSON-RPC 2.0 request to a server target ('localhost',
+   * 'remote') and await its result.
+   */
+  call(method, params, target = 'localhost') {
+    if (!this.client || !this.connected) {
       return Promise.reject(new Error('Not connected — call connect() first'));
     }
     const id = this._nextId++;
     const payload = { jsonrpc: '2.0', method, params, id };
     return new Promise((resolve, reject) => {
       this._pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify(payload));
+      this.client.publish(`shim/rpc/${target}/${this.clientId}`,
+        JSON.stringify(payload));
     });
   }
 
-  /** Fire-and-forget JSON-RPC notification (no id, no response). */
-  notify(method, params) {
-    this.ws?.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  /** Fire-and-forget JSON-RPC notification to a server target. */
+  notify(method, params, target = 'localhost') {
+    this.client?.publish(`shim/rpc/${target}/${this.clientId}`,
+      JSON.stringify({ jsonrpc: '2.0', method, params }));
   }
 
   /**
-   * Subscribe to notifications the server pushes (messages with a
-   * method and no id), e.g. "relay.message" from the Chat relay.
+   * Subscribe to notifications (messages with a method and no id),
+   * e.g. "chat.message". Handler receives (params, topic).
    * Returns an unsubscribe function.
    */
   onNotification(method, handler) {
@@ -105,39 +146,54 @@ class WsRpc {
     return () => set.delete(handler);
   }
 
+  /** Subscribe to my chat topic: chat/<name>. */
+  setChatUser(name) {
+    if (this.chatUser === name) return;
+    if (this.chatUser) this.client.unsubscribe(`chat/${this.chatUser}`);
+    this.chatUser = name;
+    if (name) this.client.subscribe(`chat/${name}`);
+  }
+
+  /** Send a chat message to user `to` (a chat.message notification). */
+  sendChat(to, text) {
+    const payload = {
+      jsonrpc: '2.0',
+      method: 'chat.message',
+      params: { from: this.chatUser || this.clientId, text },
+    };
+    this.client.publish(`chat/${to}`, JSON.stringify(payload));
+  }
+
   close() {
-    this.ws?.close();
+    this.client?.end(true);
+    this.client = null;
+    this.connected = false;
   }
 }
 
 /**
  * CommsShim — the loader. Owns the shared connection to
- * localhostServer and loads JavaScript from it (the Relay Tool
- * today; anything else the server offers later).
+ * localhostServer's broker and loads JavaScript from
+ * localhostServer (the Relay Tool today; anything else the server
+ * offers later).
  */
 const CommsShim = {
-  // Rewritten by the GUI to localhostServer's live address when the
-  // snippet is copied from the GUI page.
-  serverUrl: 'ws://127.0.0.1:8765',
-  rpc: null,         // shared WsRpc, set by connect()
+  // Stamped by the GUI with live values at serve time (the
+  // placeholders are replaced, like the Relay Tool version). The
+  // fallbacks below are the default ports, for using the raw file.
+  brokerUrl: '__BROKER_URL__',
+  assetBase: '__ASSET_BASE__',
+  rpc: null,         // shared MqttRpc, set by connect()
+  clientId: `web-${Math.random().toString(16).slice(2, 10)}`,
   toolVersion: null, // set by the Relay Tool when it loads
   // The Relay Tool version this snippet was served with — the GUI
   // stamps it in at serve time (the placeholder below is replaced,
-  // like the address). The tool registers its components under
+  // like the addresses). The tool registers its components under
   // tag names suffixed with its version, so versions can coexist
   // on a page; this tells the snippet which one it asked for.
   expectedToolVersion: '__RELAY_TOOL_VERSION__',
 
-  /** HTTP base of localhostServer (ws:// -> http://). */
-  get httpBase() {
-    return this.serverUrl.replace(/^ws/, 'http');
-  },
-
-  /**
-   * Load and evaluate a JavaScript file from url. Resolves once
-   * the script has run. This is the JS loader the Relay Tool is
-   * fetched with; it is not itself a tool function.
-   */
+  /** Load and evaluate a JavaScript file from url. */
   loadScript(url) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -148,10 +204,22 @@ const CommsShim = {
     });
   },
 
-  /** Connect the shared WebSocket (once) and return the WsRpc. */
+  /** Load MQTT.js: CDN first, localhostServer's vendored copy as fallback. */
+  async loadMqtt() {
+    if (window.mqtt) return;
+    try {
+      await this.loadScript(
+        'https://cdn.jsdelivr.net/npm/mqtt@5.16.1/dist/mqtt.min.js');
+    } catch {
+      await this.loadScript(`${this.assetBase}/mqtt.min.js`);
+    }
+    if (!window.mqtt) throw new Error('MQTT.js failed to load');
+  },
+
+  /** Connect the shared MQTT client (once) and return it. */
   async connect() {
     if (!this.rpc) {
-      this.rpc = new WsRpc(this.serverUrl);
+      this.rpc = new MqttRpc(this.brokerUrl, this.clientId);
       await this.rpc.connect();
     }
     return this.rpc;
@@ -161,7 +229,7 @@ const CommsShim = {
   async loadRelayTool() {
     const expected = this.expectedToolVersion;
     if (window.CommsShimTools?.[expected]) return; // our version is up
-    await this.loadScript(`${this.httpBase}/relay-tool.js`);
+    await this.loadScript(`${this.assetBase}/relay-tool.js`);
     if (!window.CommsShimTools?.[expected] && !this.toolVersion) {
       throw new Error('Relay Tool loaded but did not start (see console)');
     }
@@ -172,8 +240,13 @@ const CommsShim = {
     }
   },
 
-  /** Connect, then load the Relay Tool. Runs automatically below. */
+  /** Load MQTT.js, connect, then load the Relay Tool. Runs automatically. */
   async start() {
+    // Resolve serve-time placeholders that were never stamped
+    // (raw file use) to the default addresses.
+    if (this.brokerUrl.includes('__')) this.brokerUrl = 'ws://127.0.0.1:8083';
+    if (this.assetBase.includes('__')) this.assetBase = 'http://127.0.0.1:8765';
+    await this.loadMqtt();
     await this.connect();
     await this.loadRelayTool();
     console.log(`[Comms Shim] Relay Tool v${this.toolVersion} ready`);
@@ -189,7 +262,7 @@ async function wsEcho(message = 'hello') {
 
 // Expose for <script> tag usage, then start automatically.
 if (typeof window !== 'undefined') {
-  window.WsRpc = WsRpc;
+  window.MqttRpc = MqttRpc;
   window.wsEcho = wsEcho;
   window.CommsShim = CommsShim;
   CommsShim.start().catch((e) =>

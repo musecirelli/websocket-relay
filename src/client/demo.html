@@ -13,9 +13,11 @@
 <h1>Comms Shim — Relay Tool demo</h1>
 <p>Start localhostServer first (<code>make run</code> in the repo root).
 This page loads <code>snippet.js</code> exactly like a console paste does:
-the snippet connects to <code>ws://127.0.0.1:8765</code>, loads the Relay
-Tool from the server, and the tool window appears in the top-right corner.
-Use its Echo panel — or the buttons below, which call the same connection.</p>
+the snippet loads MQTT.js, connects to localhostServer's MQTT broker
+(<code>ws://127.0.0.1:8083</code>), loads the Relay Tool from the server,
+and the tool window appears in the top-right corner.
+Use its Echo and Chat panels — or the buttons below, which call the same
+connection.</p>
 
 <div style="display:flex; gap:8px; margin:16px 0;">
   <button id="ping" style="padding:8px 16px; font-size:16px; cursor:pointer;">Ping</button>
