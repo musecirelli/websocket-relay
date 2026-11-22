@@ -1,4 +1,4 @@
-package main
+package jsonrpc
 
 import (
 	"encoding/json"
@@ -28,7 +28,7 @@ func dispatch(t *testing.T, d *Dispatcher, req string) testResponse {
 }
 
 func TestEchoString(t *testing.T) {
-	resp := dispatch(t, buildDispatcher(),
+	resp := dispatch(t, BuildDispatcher(),
 		`{"jsonrpc":"2.0","method":"echo","params":"hello","id":1}`)
 	assert.Equal(t, "2.0", resp.JSONRPC)
 	assert.Nil(t, resp.Error)
@@ -37,34 +37,34 @@ func TestEchoString(t *testing.T) {
 }
 
 func TestEchoObject(t *testing.T) {
-	resp := dispatch(t, buildDispatcher(),
+	resp := dispatch(t, BuildDispatcher(),
 		`{"jsonrpc":"2.0","method":"echo","params":{"message":"hello"},"id":2}`)
 	assert.Nil(t, resp.Error)
 	assert.JSONEq(t, `{"message":"hello"}`, string(resp.Result))
 }
 
 func TestPing(t *testing.T) {
-	resp := dispatch(t, buildDispatcher(),
+	resp := dispatch(t, BuildDispatcher(),
 		`{"jsonrpc":"2.0","method":"ping","id":3}`)
 	assert.Nil(t, resp.Error)
 	assert.JSONEq(t, `"pong"`, string(resp.Result))
 }
 
 func TestUnknownMethod(t *testing.T) {
-	resp := dispatch(t, buildDispatcher(),
+	resp := dispatch(t, BuildDispatcher(),
 		`{"jsonrpc":"2.0","method":"nope","id":4}`)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, MethodNotFound, resp.Error.Code)
 }
 
 func TestNotificationGetsNoReply(t *testing.T) {
-	raw := buildDispatcher().Dispatch(
+	raw := BuildDispatcher().Dispatch(
 		[]byte(`{"jsonrpc":"2.0","method":"echo","params":"hello"}`))
 	assert.Nil(t, raw, "notifications must not be answered")
 }
 
 func TestBatch(t *testing.T) {
-	raw := buildDispatcher().Dispatch([]byte(`[
+	raw := BuildDispatcher().Dispatch([]byte(`[
 		{"jsonrpc":"2.0","method":"echo","params":"a","id":1},
 		{"jsonrpc":"2.0","method":"ping","id":2}
 	]`))
@@ -77,7 +77,7 @@ func TestBatch(t *testing.T) {
 }
 
 func TestParseError(t *testing.T) {
-	resp := dispatch(t, buildDispatcher(), `this is not json`)
+	resp := dispatch(t, BuildDispatcher(), `this is not json`)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, ParseError, resp.Error.Code)
 }
