@@ -6,7 +6,10 @@
 // ./server) could not embed ../client/snippet.js directly.
 package websocketrelay
 
-import _ "embed"
+import (
+	"embed"
+	_ "embed"
+)
 
 // ClientSnippet is the drop-in browser snippet (client/snippet.js),
 // the human-readable source. Kept for reference and debugging; the
@@ -38,3 +41,20 @@ var RelayToolJS string
 //
 //go:embed client/mqtt.min.js
 var MQTTJS string
+
+// clientFunctions holds the loadable Relay Tool function scripts
+// (client/functions/*.js), served by localhostServer at
+// GET /functions/<id>.js — see server/functions.go.
+//
+//go:embed client/functions
+var clientFunctions embed.FS
+
+// FunctionFile returns the bytes of one function script by file
+// name (e.g. "echo.js").
+func FunctionFile(name string) ([]byte, bool) {
+	body, err := clientFunctions.ReadFile("client/functions/" + name)
+	if err != nil {
+		return nil, false
+	}
+	return body, true
+}
