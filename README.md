@@ -193,7 +193,7 @@ in the tool's header). The client snippet — itself just a loader —
 fetches and evaluates it; the loader is infrastructure and is not
 one of the tool's functions.
 
-Tag names are **version-suffixed** (`relay-tool-v0-5-0`, …): a
+Tag names are **version-suffixed** (`relay-tool-v0-6-0`, …): a
 custom element name can only be defined once per page, so
 versioning the names lets different versions coexist on one page
 without colliding. Core tags use the core's version; function
@@ -204,10 +204,13 @@ the addresses). There is no retry/increment machinery: refresh
 the page for a clean slate.
 
 The core ships with **no functions**. A menu bar under the header
-holds a **Functions** menu; its **Configure functions…** item
-swaps the main panel to a configuration view listing the
-functions localhostServer offers. Checking a function adds it to
-the function list — grayed out while it loads, live once loaded;
+holds a **Functions** menu; its **Settings** item swaps the main
+panel to a Settings view laid out like an IDE settings page — a
+section list on the left, the selected section's settings on the
+right, and an × in its header that closes back to the previous
+view. The **Functions** section lists the functions
+localhostServer offers. Checking a function adds it to the
+function list — grayed out while it loads, live once loaded;
 unchecking removes it. The enabled set persists in the host
 page's `localStorage` and is restored on the next load.
 
@@ -234,8 +237,9 @@ in CSS):
   functions from core state; entries carry a `data-state`
   (`loading` grayed and inert, `error` red, `ready` clickable).
   Clicking a ready entry fires `relay-function-select`.
-- `<relay-config-panel>` — the Configure functions view: one
-  checkbox row per catalog function.
+- `<relay-settings-panel>` — the Settings view: a section list
+  (Functions today) and the selected section's settings; the
+  Functions section is one checkbox row per catalog function.
 
 Functions (served at `GET /functions/<id>.js`, cataloged in
 `src/server/functions.go`):
@@ -332,7 +336,7 @@ src/            — the Go module
   client/
     snippet.js      — the loader snippet (source): MqttRpc + CommsShim loader
     snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
-    relay-tool.js   — the Relay Tool core (menu bar, function list, Configure view, loader)
+    relay-tool.js   — the Relay Tool core (menu bar, function list, Settings view, loader)
     functions/      — loadable function scripts, one per function (echo.js, chat.js)
     mqtt.min.js     — vendored MQTT.js browser build (fallback for the CDN copy)
     demo.html       — demo page: loads the snippet like a console paste
@@ -369,7 +373,7 @@ is O(1).
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
 - [x] Loadable Relay Tool functions: the core ships empty;
-      Functions → Configure functions… enables functions from
+      Functions → Settings enables functions from
       localhostServer's catalog (functions.list) — no redeploy
 - [ ] More Relay Tool functions
 - [ ] Chat users and presence (beyond the two-user test setup)
