@@ -119,6 +119,20 @@ func TestBridgeChatAndRemoteRPC(t *testing.T) {
 	case <-time.After(400 * time.Millisecond):
 	}
 
+	// Script delivery, back-flow: a script.deliver published on
+	// the REMOTE broker must reach a subscriber on the LOCAL one.
+	subscribe(t, localClient, "scripts/steve")
+	deliver, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "method": "script.deliver",
+		"params": map[string]any{
+			"from": "muse", "name": "Puppy", "description": "test", "script": "void 0",
+		},
+	})
+	tok = remoteClient.Publish("scripts/steve", 0, false, deliver)
+	require.True(t, tok.WaitTimeout(5*time.Second))
+	got = awaitMsg(t, localMsgs, "script.deliver")
+	assert.Contains(t, got, `"name":"Puppy"`)
+
 	// RPC to target remote: request published locally must be
 	// answered by the remote responder, response bridged back.
 	subscribe(t, localClient, "shim/clients/local-side/rpc")
@@ -173,15 +187,17 @@ func TestFunctionsListOverMQTT(t *testing.T) {
 	got := awaitMsg(t, msgs, `"id":3`)
 	assert.Contains(t, got, `"id":"echo"`)
 	assert.Contains(t, got, `"id":"chat"`)
+	assert.Contains(t, got, `"id":"scripts"`)
 	assert.Contains(t, got, `"script":"/functions/echo.js"`)
 	assert.Contains(t, got, `"script":"/functions/chat.js"`)
+	assert.Contains(t, got, `"script":"/functions/scripts.js"`)
 }
 
 func TestFunctionFilesServed(t *testing.T) {
 	srv := httptest.NewServer(buildMux())
 	t.Cleanup(srv.Close)
 
-	for _, id := range []string{"echo", "chat"} {
+	for _, id := range []string{"echo", "chat", "scripts"} {
 		resp, err := http.Get(srv.URL + "/functions/" + id + ".js")
 		require.NoError(t, err)
 		body, _ := io.ReadAll(resp.Body)
