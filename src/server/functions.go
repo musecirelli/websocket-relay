@@ -2,7 +2,7 @@
 //
 // localhostServer serves each function's script at
 // /functions/<id>.js and describes the whole catalog over
-// JSON-RPC (method functions.list). The Relay Tool's Configure
+// JSON-RPC (method functions.list). The Relay Tool's Settings
 // panel renders the catalog; enabling a function makes the tool
 // load its dependencies (in order) and then its script, which
 // registers the function's panel with the tool core.
@@ -45,7 +45,7 @@ var functionCatalog = []FunctionMeta{
 	{
 		ID:          "echo",
 		Name:        "Echo",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Send a message, get it echoed back — pick which server answers.",
 		Script:      "/functions/echo.js",
 		Dependencies: []FunctionDep{},

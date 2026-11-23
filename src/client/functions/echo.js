@@ -1,5 +1,5 @@
 /**
- * Comms Shim — Relay Tool function: Echo (v1.0.0)
+ * Comms Shim — Relay Tool function: Echo (v1.0.1)
  *
  * A loadable function: localhostServer serves this file at
  * /functions/echo.js and lists it in the functions.list catalog.
@@ -13,7 +13,7 @@
  * the snippet's shared MqttRpc (window.CommsShim.rpc).
  */
 (() => {
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const TAG = `relay-echo-panel-v${VERSION.replaceAll('.', '-')}`;
 
   class RelayEchoPanel extends HTMLElement {
@@ -26,11 +26,13 @@
       this.shadowRoot.innerHTML = `
         <style>
           ${window.RelayTool.panelCSS}
-          form { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+          .panel { display: flex; flex-direction: column; }
+          form { flex: none; display: flex; gap: 0.4rem;
+                 margin-bottom: 0.5rem; }
           input { flex: 1; padding: 0.4rem; font: inherit; }
           select { padding: 0.4rem; font: inherit; }
           button { padding: 0.4rem 0.9rem; font: inherit; cursor: pointer; }
-          textarea { width: 100%; height: calc(100% - 3rem);
+          textarea { flex: 1; min-height: 0; width: 100%;
                      box-sizing: border-box; resize: none;
                      font-family: ui-monospace, Menlo, monospace;
                      font-size: 0.82rem; padding: 0.5rem; }
