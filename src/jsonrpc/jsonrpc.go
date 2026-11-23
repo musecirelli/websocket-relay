@@ -1,4 +1,4 @@
-package main
+package jsonrpc
 
 import (
 	"encoding/json"
@@ -192,7 +192,7 @@ func pingHandler(params json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(`"pong"`), nil
 }
 
-func buildDispatcher() *Dispatcher {
+func BuildDispatcher() *Dispatcher {
 	d := NewDispatcher()
 	d.Register("echo", echoHandler)
 	d.Register("ping", pingHandler)

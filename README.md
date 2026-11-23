@@ -1,10 +1,16 @@
 # websocket-relay
 
-A WebSocket relay speaking **JSON-RPC 2.0**: the **Comms Shim**.
+A relay speaking **MQTT with JSON-RPC 2.0 payloads**: the **Comms Shim**.
 
-- **Server (localhostServer):** Go; the server itself uses only the standard library (the module's few dependencies are test-only)
-- **Client:** a drop-in vanilla-JS snippet for any web page
+- **Servers (localhostServer, Remote Server):** Go, each embedding an
+  MQTT broker ([mochi-mqtt/server](https://github.com/mochi-mqtt/server))
+- **Client:** a drop-in vanilla-JS snippet for any web page, using
+  [MQTT.js](https://github.com/mqttjs/MQTT.js) over WebSocket
 - **GUI:** served by localhostServer on a random port (see How to run)
+
+All communication is MQTT (QoS 0) carrying JSON-RPC 2.0: commands
+(request/response, correlated by the JSON-RPC `id`) and chat
+(notifications). See Protocol for the topic conventions.
 
 Version control: git, hosted on GitHub — canonical repo
 `scirelli/websocket-relay`; see `.agents/WORKFLOW.md`.
@@ -13,36 +19,37 @@ Version control: git, hosted on GitHub — canonical repo
 
 The names we use for the parts of this system:
 
-- **Comms Shim** — the whole local system: a WebSocket server running
-  on the user's own machine plus its GUI and client snippet, letting a
-  web page talk to the user's localhost. ("Shim" because it's a thin
+- **Comms Shim** — the whole system: MQTT brokers running on the
+  user's machines plus a GUI and client snippet, letting a web page
+  talk to services on those machines. ("Shim" because it's a thin
   layer dropped between the browser page and the local machine.)
-- **localhostServer** — the server component of the Comms Shim. Runs
-  on the user's localhost, accepts WebSocket connections from the
-  client snippet, speaks JSON-RPC 2.0. Currently the Go program in
-  `src/server/`, listening on `ws://127.0.0.1:8765`.
+- **localhostServer** — the broker on the user's own machine
+  (`src/server/`). It embeds an MQTT broker, answers JSON-RPC
+  commands addressed to it, serves the browser assets (Relay Tool,
+  MQTT.js), hosts the GUI, and bridges to the Remote Server.
+- **Remote Server** — a second broker (`src/remoteserver/`) running
+  on another machine. It answers its own JSON-RPC commands and is
+  chat user `remote`: an operator-staffed test endpoint whose
+  console receives chat messages and replies to them.
+- **Bridge** — the link localhostServer initiates to the Remote
+  Server's broker: chat messages and commands for the remote
+  target are republished there, and replies flow back.
 - **Client snippet** — the drop-in JavaScript (`src/client/snippet.js`)
   pasted into a web page or the browser developer console. It is a
-  *loader*: it connects the page to localhostServer and loads the
-  Relay Tool from it. The GUI hands it out minified (Closure
-  Compiler; see the Relay Tool section).
+  *loader*: it loads MQTT.js, connects the page to localhostServer's
+  broker, and loads the Relay Tool. The GUI hands it out minified
+  (Closure Compiler; see the Relay Tool section).
 - **Relay Tool** — the versioned web-components app the snippet loads
-  from localhostServer (`GET /relay-tool.js` on the WebSocket port).
-  A floating window on the host page: a function list on the left,
-  the selected function's panel on the right.
-- **Remote Server** — the far end of the Chat relay: a separate Go
-  server (`src/remoteserver/`) that localhostServer dials over TCP
-  when a Chat panel connects to it. It speaks newline-delimited
-  JSON, logs everything it receives, and broadcasts lines typed on
-  its console back to connected chats — an operator-staffed test
-  endpoint, listening on port 9000 by default.
+  from localhostServer (`GET /relay-tool.js`). A floating window on
+  the host page: a function list on the left, the selected
+  function's panel on the right.
 - **GUI** — localhostServer's web GUI, reachable at
   `http://localhost:<random port>`. The port is random (chosen at
-  startup) and the full link is displayed on the command line when the
-  server runs. For now the GUI is one simple page — "here's the code
-  snippet to drop in your developer console", with the snippet code —
-  and will eventually become a web app built with vanilla JS, CSS,
-  HTML and standard web components.
+  startup) and the full link is displayed on the command line when
+  the server runs. For now the GUI is one simple page — "here's the
+  code snippet to drop in your developer console", with the snippet
+  code — and will eventually become a web app built with vanilla
+  JS, CSS, HTML and standard web components.
 
 ## How to run
 
@@ -73,57 +80,77 @@ make build          # or just build: build/debug/ (server + remote-server)
 make build-release  # build/release/ (server + remote-server)
 make run-release    # build it and run it
 
-# Server options (pass to the binary, or after `go run`):
-#   -host 127.0.0.1 (default)   -port 8765 (default, WebSocket port)
-./build/release/websocket-relay -port 9000
+# localhostServer options (pass to the binary, or after `go run`):
+#   -host 127.0.0.1        bind host for the broker, assets and GUI
+#   -port 8765             HTTP asset port (/health, /relay-tool.js, /mqtt.min.js)
+#   -mqtt-tcp 1883         MQTT broker port (TCP)
+#   -mqtt-ws 8083          MQTT broker port (WebSocket)
+#   -remote-host ""        Remote Server host — turns the bridge on
+#   -remote-mqtt-port 1883 Remote Server MQTT TCP port
+./build/release/websocket-relay -remote-host 192.0.2.10
 ```
 
 Without make, the plain Go commands work from inside `src/`
 (e.g. `go run ./server`). `make clean` empties `build/`.
 
-Startup prints both addresses — the GUI port is **random**, chosen
+Startup prints the addresses — the GUI port is **random**, chosen
 fresh on every run:
 
 ```
 Comms Shim — localhostServer
-  WebSocket (JSON-RPC 2.0): ws://127.0.0.1:8765
+  MQTT broker: tcp 127.0.0.1:1883, ws 127.0.0.1:8083
+  Assets: http://127.0.0.1:8765 (/relay-tool.js, /mqtt.min.js)
   GUI: http://127.0.0.1:51234        <- example; your port will differ
-  methods: echo, ping, relay.connect, relay.disconnect, relay.send, relay.status
+  Bridge to Remote Server: on -> tcp://192.0.2.10:1883
+  methods (target localhost): [echo ping]
 ```
 
-Leave it running; Ctrl+C stops it.
+Leave it running; Ctrl+C stops it. The bridge connects in the
+background and retries until the Remote Server is reachable, so
+the two servers can start in any order.
 
 ### Use the GUI
 
 1. Open the printed GUI link in a browser on the same machine.
 2. The page shows the client snippet (minified) with localhostServer's
-   real address already filled in. Click **Copy snippet**.
+   real broker address already filled in. Click **Copy snippet**.
 3. On any web page, open the developer console (F12 / Cmd+Option+J)
-   and paste. The snippet connects and loads the Relay Tool — its
-   window appears on the page. Pick **Echo**, type a message, Send.
-   From the console, `await wsEcho('hello')` also works.
+   and paste. The snippet loads MQTT.js (CDN first, localhostServer's
+   vendored copy as fallback), connects, and loads the Relay Tool —
+   its window appears on the page. Pick **Echo** or **Chat**. From
+   the console, `await wsEcho('hello')` also works.
 
 There is also a demo page, `src/client/demo.html` — open it in a
 browser on the same machine while the server runs; it loads the
 snippet the same way a console paste does and the Relay Tool
 appears.
 
-### Run the Remote Server (for the Chat function)
-
-The Chat function relays to a Remote Server, which is a separate
-program — run it on the machine the Chat panel should connect to:
+### Run the Remote Server (for Chat and remote commands)
 
 ```sh
-make run-remote     # or: ./build/release/remote-server [-port 9000]
+make run-remote     # or: ./build/release/remote-server [-port 1883] [-ws-port 8083] [-console <file>]
 ```
 
-It listens on all interfaces (port 9000 by default), logs every
-message it receives, and broadcasts lines typed on its console to
-all connected chats. Run detached, it can take its console from a
-FIFO instead: `remote-server -console /tmp/rs-in`, then
-`printf 'hello\n' > /tmp/rs-in` sends a line. In the Relay Tool,
-pick **Chat**, enter the Remote Server's `host:port` (a domain name
-works too — localhostServer resolves it), and Connect.
+It embeds a broker listening on all interfaces (TCP 1883,
+WebSocket 8083), answers commands addressed to target `remote`,
+and is chat user `remote`: chat messages addressed to it are
+logged, and lines typed on its console are sent back to whoever
+wrote last. Run detached, it can take its console from a FIFO
+instead: `remote-server -console /tmp/rs-in`, then
+`printf 'hello\n' > /tmp/rs-in` sends a line.
+
+For the bridge, start localhostServer with
+`-remote-host <Remote Server host>`. In the Relay Tool's Chat
+panel, the Broker field defaults to localhostServer's broker —
+chat then flows over the bridge. The field also accepts the
+Remote Server's broker directly (`ws://<host>:8083`): WebSocket
+connections are not same-origin bound, so the panel can talk to
+either broker.
+
+Known limitation: from an `https` page, a plain `ws://` connection
+to a LAN address is blocked as mixed content (loopback addresses
+are exempt). Use an `http` page, the demo page, or a loopback
+broker address for now; `wss` is future work.
 
 ### Run the tests
 
@@ -132,38 +159,39 @@ make test           # or: cd src && go test ./...
 ```
 
 Unit tests cover the JSON-RPC dispatcher directly; integration
-tests run the real handler over a WebSocket connection and check
-the GUI page. No server needs to be running first — the tests
-start their own.
+tests start real brokers and exercise RPC-over-MQTT, the bridge,
+the asset routes, and the GUI page. No server needs to be running
+first — the tests start their own.
 
 For your own page, the snippet does everything on paste; its API
 after loading (see `src/client/snippet.js`):
 
 ```js
-CommsShim.rpc            // the shared WsRpc connection
+CommsShim.rpc            // the shared MqttRpc connection
 await wsEcho('hello');   // -> "hello"
-const rpc = new WsRpc('ws://127.0.0.1:8765');  // or your own connection
+const rpc = new MqttRpc('ws://127.0.0.1:8083', 'my-client-id');
 await rpc.connect();
-await rpc.call('echo', 'hello');
+await rpc.call('echo', 'hello');          // target 'localhost'
+await rpc.call('echo', 'hello', 'remote'); // answered by the Remote Server
 ```
 
 ## The Relay Tool
 
 The Relay Tool is a small web-components app served by
-localhostServer at `GET /relay-tool.js` (WebSocket port), versioned
-(`X-Relay-Tool-Version` header; the version also shows in the tool's
-header). The client snippet — itself just a loader — fetches and
-evaluates it; the loader is infrastructure and is not one of the
-tool's functions.
+localhostServer at `GET /relay-tool.js` (HTTP asset port),
+versioned (`X-Relay-Tool-Version` header; the version also shows
+in the tool's header). The client snippet — itself just a loader —
+fetches and evaluates it; the loader is infrastructure and is not
+one of the tool's functions.
 
-The tool's tag names are **version-suffixed** (`relay-tool-v0-3-0`,
-`relay-echo-panel-v0-3-0`, …): a custom element name can only be
+The tool's tag names are **version-suffixed** (`relay-tool-v0-4-0`,
+`relay-echo-panel-v0-4-0`, …): a custom element name can only be
 defined once per page, so versioning the names lets different tool
 versions coexist on one page without colliding — every tag lookup
 in the tool is computed from its version. The GUI stamps the
 expected version into the snippet it serves (same serve-time
-rewrite as the server address). There is no retry/increment
-machinery: refresh the page for a clean slate.
+rewrite as the addresses). There is no retry/increment machinery:
+refresh the page for a clean slate.
 
 Components (all vanilla custom elements; communication via custom
 elements, `data-` attributes, and CustomEvents; animations in CSS):
@@ -173,13 +201,13 @@ elements, `data-` attributes, and CustomEvents; animations in CSS):
 - `<relay-function-list>` — left panel listing the functions from a
   registry; clicking one marks it active and fires
   `relay-function-select`.
-- `<relay-echo-panel>` — the Echo function: text field, Send button,
-  readonly log with every echo appended.
-- `<relay-chat-panel>` — the Chat function: an address row (host:port
-  input, connect button, red/yellow/green status light), an
-  IRC-style message log, and a message composer. It drives
-  localhostServer's relay methods and renders the messages
-  localhostServer pushes back as notifications.
+- `<relay-echo-panel>` — the Echo function: text field, a target
+  selector (`localhost` / `remote`), Send button, readonly log.
+- `<relay-chat-panel>` — the Chat function: a broker row (broker
+  URL input, connect button, red/yellow/green status light), a
+  "You are / Chat with" row naming the two chat users, an
+  IRC-style message log, and a message composer. The panel owns
+  its own broker connection, independent of the shared one.
 
 Adding a function = one entry in the registry in
 `src/client/relay-tool.js` plus one panel component — the same
@@ -193,7 +221,16 @@ make stops and asks you to run `mise install`.
 
 ## Protocol
 
-JSON-RPC 2.0 over WebSocket text frames.
+MQTT (QoS 0) carrying JSON-RPC 2.0 payloads. Chat messages are not
+retained: a client that isn't connected misses them.
+
+Topics:
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `shim/rpc/<target>/<clientId>` | client → server | JSON-RPC request or notification; `<target>` is `localhost` or `remote` |
+| `shim/clients/<clientId>/rpc` | server → client | JSON-RPC response |
+| `chat/<username>` | anyone → that user | `chat.message` notification |
 
 Request:
 ```json
@@ -207,25 +244,23 @@ Error response (e.g. unknown method):
 ```json
 {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found: …"}, "id": 1}
 ```
+Chat message (a notification — no `id`, no response):
+```json
+{"jsonrpc": "2.0", "method": "chat.message", "params": {"from": "steve", "text": "hi"}}
+```
 
-Methods:
+Methods (both servers, via their target):
 
 | Method | Params | Result |
 |---|---|---|
 | `echo` | anything | params, verbatim |
 | `ping` | — | `"pong"` |
-| `relay.connect` | `{host, port}` | `{remote}` — dials the Remote Server (per browser session) |
-| `relay.disconnect` | — | `"ok"` |
-| `relay.send` | `{text}` | `"ok"` — forwards the text to the Remote Server |
-| `relay.status` | — | `{state, remote}` |
 
-Notifications (no `id`) get no response, per spec. Batch requests are supported.
-
-localhostServer also pushes notifications to the browser:
-`relay.message` (`{from, text}` — a chat message from the Remote
-Server) and `relay.status` (`{state}` — the Remote Server went
-away). The localhostServer↔Remote Server hop is TCP with
-newline-delimited JSON frames: `{"type":"msg","from":"chat","text":"…"}`.
+Notifications get no response, per spec. Batch requests are
+supported. The bridge forwards `chat/+` and `shim/rpc/remote/+`
+from localhostServer's broker to the Remote Server's, and
+`chat/+` and `shim/clients/+/rpc` back; it never re-forwards
+messages the broker injected itself, which keeps it loop-free.
 
 ## Layout
 
@@ -235,30 +270,38 @@ mise.toml       — pinned tools (Go; Node/Java/Closure for the snippet build) +
 src/            — the Go module
   go.mod, go.sum
   assets.go     — module-root package embedding the client files
+  jsonrpc/      — JSON-RPC 2.0 Dispatcher (Strategy registry) + echo/ping
+  mqttx/        — MQTT wiring: embedded broker factory, RPC responder, chat helpers, topic conventions
   server/
-    main.go       — entry point, WS listener, connection loop, startup banner
-    websocket.go  — transport: RFC 6455 handshake + framing (stdlib only)
-    rpc.go        — protocol: Dispatcher (Strategy registry) + echo/ping
-    relay.go      — Chat relay: per-session Remote Server connection + relay.* methods
+    main.go       — entry point: broker, asset mux, GUI, startup banner
+    bridge.go     — bridge to the Remote Server's broker (hook + uplink client)
     gui.go        — GUI listener (random port) + snippet page
     relaytool.go  — serves the Relay Tool at /relay-tool.js (versioned)
-    rpc_test.go   — dispatcher unit tests
-    server_test.go — WebSocket + GUI + Relay Tool + relay integration tests
+    server_test.go — broker/RPC/bridge/assets/GUI integration tests
   remoteserver/
-    main.go       — the Remote Server: TCP NDJSON chat endpoint with an operator console
+    main.go       — the Remote Server: broker + RPC responder + chat user "remote" + operator console
   client/
-    snippet.js      — the loader snippet (source): WsRpc + CommsShim loader
+    snippet.js      — the loader snippet (source): MqttRpc + CommsShim loader
     snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
     relay-tool.js   — the Relay Tool web-components app (served by localhostServer)
+    mqtt.min.js     — vendored MQTT.js browser build (fallback for the CDN copy)
     demo.html       — demo page: loads the snippet like a console paste
 build/          — build artifacts and executables (generated, gitignored)
   debug/          make build
   release/        make build-release
 ```
 
-Design notes: transport and protocol are separate layers; adding a method is
-one `Register(name, handler)` call — no transport changes. Dispatch is O(1)
-per method lookup, O(n) in message size.
+Dependencies: the brokers and bridge use
+`github.com/mochi-mqtt/server/v2` and
+`github.com/eclipse/paho.mqtt.golang`; tests use
+`github.com/stretchr/testify`. The browser client is MQTT.js
+(vendored, MIT licensed).
+
+Design notes: the Dispatcher is transport-independent — the same
+registry answers commands on either server. Adding a method is one
+`Register(name, handler)` call. Dispatch is O(1) per method
+lookup, O(n) in message size; pending-call lookup in the client
+is O(1).
 
 ## Roadmap
 
@@ -269,10 +312,12 @@ per method lookup, O(n) in message size.
       out the minified form
 - [x] Relay Tool (versioned): web-components window served by
       localhostServer, loaded by the snippet; Echo panel
-- [x] Chat function: the Relay Tool relays chat through
-      localhostServer to a Remote Server (TCP, NDJSON); the Remote
-      Server is an operator-staffed test endpoint in this repo
+- [x] Chat function with an operator-staffed Remote Server
+- [x] MQTT migration: all comms are MQTT + JSON-RPC 2.0; both
+      servers embed brokers; localhostServer bridges to the
+      Remote Server
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
 - [ ] More Relay Tool functions
-- [ ] Relay between connected clients (design TBD)
+- [ ] Chat users and presence (beyond the two-user test setup)
+- [ ] `wss` for the brokers (mixed-content-safe from https pages)

@@ -1,19 +1,19 @@
 /**
- * Comms Shim — Relay Tool v0.3.0
+ * Comms Shim — Relay Tool v0.4.0
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
  * components — vanilla JS/HTML/CSS, no frameworks.
  *
  * Components (tag names carry the version — see below):
- *   <relay-tool-v0-3-0>           the floating window (drag, resize, close)
- *   <relay-function-list-v0-3-0>  left panel: the available functions
- *   <relay-echo-panel-v0-3-0>     the echo function panel (right side)
- *   <relay-chat-panel-v0-3-0>     the chat function panel (Remote Server relay)
+ *   <relay-tool-v0-4-0>           the floating window (drag, resize, close)
+ *   <relay-function-list-v0-4-0>  left panel: the available functions
+ *   <relay-echo-panel-v0-4-0>     the echo function panel (right side)
+ *   <relay-chat-panel-v0-4-0>     the chat function panel (MQTT chat between users)
  *
  * Versioned tags: a custom element name can only ever be defined
  * once per page, so the tag names are suffixed with the tool
- * version (relay-tool-v0-3-0). Different versions of the tool can
+ * version (relay-tool-v0-4-0). Different versions of the tool can
  * be dropped onto the same page without colliding; every tag
  * lookup in this file is computed from VERSION via tag(). There
  * is deliberately no catch-and-retry on define() — if you need a
@@ -28,7 +28,7 @@
  * and is deliberately NOT a registry entry.
  */
 (() => {
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
 
   // This exact version already loaded? Then there is nothing to
   // do — the same code is already registered under the same tags.
@@ -127,6 +127,7 @@
           ${panelCSS}
           form { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
           input { flex: 1; padding: 0.4rem; font: inherit; }
+          select { padding: 0.4rem; font: inherit; }
           button { padding: 0.4rem 0.9rem; font: inherit; cursor: pointer; }
           textarea { width: 100%; height: calc(100% - 3rem);
                      box-sizing: border-box; resize: none;
@@ -137,22 +138,27 @@
           <form>
             <input name="message" placeholder="message to echo"
                    autocomplete="off">
+            <select name="target" title="Which server answers">
+              <option value="localhost">localhost</option>
+              <option value="remote">remote</option>
+            </select>
             <button type="submit">Send</button>
           </form>
           <textarea readonly placeholder="Echoes will appear here"></textarea>
         </div>`;
       const form = this.shadowRoot.querySelector('form');
       const input = this.shadowRoot.querySelector('input');
+      const target = this.shadowRoot.querySelector('select[name="target"]');
       this._log = this.shadowRoot.querySelector('textarea');
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const message = input.value;
         if (!message) return;
-        this._append(`> ${message}`);
+        this._append(`> [${target.value}] ${message}`);
         try {
           const rpc = window.CommsShim?.rpc;
           if (!rpc) throw new Error('not connected to localhostServer');
-          const result = await rpc.call('echo', message);
+          const result = await rpc.call('echo', message, target.value);
           this._append(`< ${typeof result === 'string' ? result : JSON.stringify(result)}`);
         } catch (err) {
           this._append(`! ${err.message || err}`);
@@ -169,41 +175,42 @@
   }
 
   // ----------------------------------------------------------------
-  // <relay-chat-panel-vX-Y-Z> — the Chat function: relay messages
-  // through localhostServer to a Remote Server.
+  // <relay-chat-panel-vX-Y-Z> — the Chat function: MQTT chat
+  // between users, JSON-RPC 2.0 payloads (chat.message
+  // notifications on chat/<username> topics).
   //
-  // Layout (top to bottom): an address row (URL/IP + port input, a
-  // connect button with a link icon, and a status light — red
-  // disconnected, yellow connecting, green connected; all CSS off
-  // the container's data-state), an IRC-style message log, and a
-  // composer (text input + Send button).
-  //
-  // Talks JSON-RPC to localhostServer: relay.connect /
-  // relay.disconnect / relay.send / relay.status, and subscribes
-  // to the relay.message / relay.status notifications the server
-  // pushes when the Remote Server says something or goes away.
-  // The relay belongs to the WebSocket session, not to this panel:
-  // switching functions keeps the connection, and a fresh panel
-  // syncs its state via relay.status.
+  // The panel owns its own MqttRpc connection to the broker in
+  // the Broker field — localhostServer's broker by default, but
+  // any broker works (e.g. the Remote Server directly: WebSocket
+  // connections are not same-origin bound). Layout: a broker row
+  // (URL input, connect button with link icon, status light —
+  // red disconnected, yellow connecting, green connected, all CSS
+  // off data-state), a "you are / chat with" row, an IRC-style
+  // message log, and a composer.
   // ----------------------------------------------------------------
   class RelayChatPanel extends HTMLElement {
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
+      this._rpc = null;
       this._unsubscribe = [];
       this._state = 'disconnected';
     }
 
     connectedCallback() {
+      const homeBroker = window.CommsShim?.brokerUrl || 'ws://127.0.0.1:8083';
       this.shadowRoot.innerHTML = `
         <style>
           ${panelCSS}
           .chat { display: flex; flex-direction: column; height: 100%;
                   box-sizing: border-box; gap: 0.5rem; }
-          .top { display: flex; align-items: center; gap: 0.4rem; }
-          .top input { flex: 1; min-width: 0; padding: 0.4rem; font: inherit;
-                       font-family: ui-monospace, Menlo, monospace;
+          .top, .who { display: flex; align-items: center; gap: 0.4rem; }
+          .top input, .who input { flex: 1; min-width: 0; padding: 0.4rem;
+                  font: inherit; }
+          .top input { font-family: ui-monospace, Menlo, monospace;
                        font-size: 0.85rem; }
+          .who label { color: var(--rt-muted, #777); font-size: 0.85rem; }
+          .who input { flex: 0 1 8rem; }
           .connect { display: inline-flex; align-items: center; gap: 0.35rem;
                      padding: 0.4rem 0.6rem; font: inherit; cursor: pointer; }
           .connect svg { width: 14px; height: 14px; flex: none; }
@@ -233,8 +240,8 @@
         </style>
         <div class="chat panel" data-state="disconnected">
           <form class="top">
-            <input name="address"
-                   placeholder="host:port — e.g. 192.168.1.20:9000"
+            <input name="broker" value="${homeBroker}"
+                   placeholder="broker — ws://host:port"
                    autocomplete="off" spellcheck="false">
             <button class="connect" type="submit" title="Connect / disconnect">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -247,6 +254,12 @@
             </button>
             <span class="light" role="status" aria-label="Not connected"></span>
           </form>
+          <div class="who">
+            <label for="me">You are</label>
+            <input name="me" value="steve" autocomplete="off" spellcheck="false">
+            <label for="peer">Chat with</label>
+            <input name="peer" value="remote" autocomplete="off" spellcheck="false">
+          </div>
           <div class="log" aria-live="polite"></div>
           <form class="composer">
             <input name="text" placeholder="Message…" autocomplete="off">
@@ -256,7 +269,9 @@
 
       this._root = this.shadowRoot.querySelector('.chat');
       this._logEl = this.shadowRoot.querySelector('.log');
-      this._addr = this.shadowRoot.querySelector('input[name="address"]');
+      this._broker = this.shadowRoot.querySelector('input[name="broker"]');
+      this._me = this.shadowRoot.querySelector('input[name="me"]');
+      this._peer = this.shadowRoot.querySelector('input[name="peer"]');
       this._text = this.shadowRoot.querySelector('input[name="text"]');
       this._light = this.shadowRoot.querySelector('.light');
 
@@ -269,40 +284,33 @@
           e.preventDefault();
           this._send();
         });
-
-      const rpc = window.CommsShim?.rpc;
-      if (rpc?.onNotification) {
-        this._unsubscribe.push(rpc.onNotification('relay.message', (p) => {
-          this._appendLine('', p?.from || 'remote', p?.text ?? '');
-        }));
-        this._unsubscribe.push(rpc.onNotification('relay.status', (p) => {
-          if (p?.state === 'disconnected' && this._state === 'connected') {
-            this._setState('disconnected');
-            this._appendLine('sys', '', 'Remote Server disconnected');
-          }
-        }));
-        // Sync with the session's real relay state.
-        rpc.call('relay.status').then((s) => {
-          if (s?.state === 'connected') {
-            this._setState('connected');
-            this._appendLine('sys', '', `Connected to ${s.remote}`);
-          }
-        }).catch(() => {});
-      } else {
-        this._appendLine('err', '', 'Not connected to localhostServer');
-      }
-      this._addr.focus();
+      this._me.addEventListener('change', () => {
+        if (this._rpc && this._state === 'connected') {
+          this._rpc.setChatUser(this._me.value.trim());
+          this._appendLine('sys', '',
+            `Now subscribed as ${this._me.value.trim()} (chat/${this._me.value.trim()})`);
+        }
+      });
+      this._broker.focus();
     }
 
     disconnectedCallback() {
+      this._teardown();
+    }
+
+    _teardown() {
       this._unsubscribe.forEach((u) => u());
       this._unsubscribe = [];
+      if (this._rpc) {
+        this._rpc.close();
+        this._rpc = null;
+      }
     }
 
     _setState(state) {
       this._state = state;
       this._root.dataset.state = state;
-      this._addr.disabled = state !== 'disconnected';
+      this._broker.disabled = state !== 'disconnected';
       this._light.setAttribute('aria-label', {
         disconnected: 'Not connected',
         connecting: 'Connecting…',
@@ -310,65 +318,66 @@
       }[state]);
     }
 
-    /** "https://example.com:9000/x" / "192.168.1.20" -> {host, port}. */
-    _parseAddress(raw) {
-      const s = String(raw || '').trim()
-        .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '') // strip scheme
-        .split('/')[0];
-      const i = s.lastIndexOf(':');
-      if (i > 0) {
-        const port = Number.parseInt(s.slice(i + 1), 10);
-        return { host: s.slice(0, i), port: Number.isNaN(port) ? 9000 : port };
-      }
-      return { host: s, port: 9000 };
-    }
-
     async _toggleConnect() {
-      const rpc = window.CommsShim?.rpc;
-      if (!rpc) {
-        this._appendLine('err', '', 'Not connected to localhostServer');
-        return;
-      }
-      if (this._state === 'connected') {
-        try { await rpc.call('relay.disconnect'); } catch { /* already gone */ }
+      if (this._state === 'connected' || this._state === 'connecting') {
+        this._teardown();
         this._setState('disconnected');
         this._appendLine('sys', '', 'Disconnected');
         return;
       }
-      if (this._state === 'connecting') return;
-      const { host, port } = this._parseAddress(this._addr.value);
-      if (!host) {
-        this._appendLine('err', '', 'Enter a host (URL or IP) to connect to');
+      const url = this._broker.value.trim();
+      const me = this._me.value.trim();
+      if (!url || !me) {
+        this._appendLine('err', '', 'Broker URL and your name are required');
+        return;
+      }
+      if (!window.mqtt || !window.MqttRpc) {
+        this._appendLine('err', '', 'MQTT client not loaded — is localhostServer reachable?');
         return;
       }
       this._setState('connecting');
+      const rpc = new window.MqttRpc(url, `${window.CommsShim?.clientId || 'web'}-chat`);
+      this._rpc = rpc;
+      this._unsubscribe.push(rpc.onStateChange((state) => {
+        if (this._rpc !== rpc) return;
+        if (state === 'connected') this._setState('connected');
+        else if (state === 'disconnected' && this._state === 'connected') {
+          this._setState('disconnected');
+          this._appendLine('sys', '', 'Broker connection lost');
+        }
+      }));
+      this._unsubscribe.push(rpc.onNotification('chat.message', (p) => {
+        this._appendLine('', p?.from || 'peer', p?.text ?? '');
+      }));
       try {
-        const result = await rpc.call('relay.connect', { host, port });
+        await rpc.connect();
+        rpc.setChatUser(me);
         this._setState('connected');
         this._appendLine('sys', '',
-          `Connected to ${result?.remote ?? `${host}:${port}`}`);
+          `Connected to ${url} — subscribed to chat/${me}`);
         this._text.focus();
       } catch (err) {
+        this._teardown();
         this._setState('disconnected');
         this._appendLine('err', '', err.message || String(err));
       }
     }
 
-    async _send() {
+    _send() {
       const text = this._text.value;
       if (!text) return;
-      if (this._state !== 'connected') {
-        this._appendLine('err', '',
-          'Not connected — connect to a Remote Server first');
+      if (this._state !== 'connected' || !this._rpc) {
+        this._appendLine('err', '', 'Not connected — connect to a broker first');
         return;
       }
-      try {
-        await window.CommsShim.rpc.call('relay.send', { text });
-        this._appendLine('me', 'me', text);
-        this._text.value = '';
-      } catch (err) {
-        this._appendLine('err', '', err.message || String(err));
+      const peer = this._peer.value.trim();
+      if (!peer) {
+        this._appendLine('err', '', 'Who are you chatting with? Set "Chat with"');
+        return;
       }
+      this._rpc.sendChat(peer, text);
+      this._appendLine('me', 'me', text);
+      this._text.value = '';
     }
 
     _appendLine(kind, from, text) {
