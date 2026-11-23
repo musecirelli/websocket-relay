@@ -24,7 +24,7 @@
  * denied (crossed out) — are CSS off data-state.
  */
 (() => {
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const TAG = `relay-scripts-panel-v${VERSION.replaceAll('.', '-')}`;
 
   class RelayScriptsPanel extends HTMLElement {
@@ -108,6 +108,7 @@
         </style>
         <div class="inbox panel" data-state="disconnected">
           <form class="top">
+            <label for="broker">Broker</label>
             <input name="broker" value="${homeBroker}"
                    placeholder="broker — ws://host:port"
                    autocomplete="off" spellcheck="false">
@@ -151,8 +152,7 @@
 
       this._renderList();
       this._renderDetail();
-      // Listening is the whole point of an inbox: connect on load.
-      this._toggleConnect();
+      // Starts disconnected, like Chat: the user clicks Connect.
     }
 
     disconnectedCallback() {
