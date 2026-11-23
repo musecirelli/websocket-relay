@@ -1,5 +1,5 @@
 /**
- * Comms Shim — Relay Tool v0.5.0 (core)
+ * Comms Shim — Relay Tool v0.6.0 (core)
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
@@ -9,16 +9,18 @@
  * localhostServer catalogs them (JSON-RPC functions.list —
  * metadata: id, name, version, description, script URL,
  * dependencies) and serves each script at /functions/<id>.js.
- * The Functions menu's "Configure functions…" view enables and
- * disables them; enabling loads the function's dependencies (in
- * declared order) and its script, which registers its panel via
- * window.RelayTool.registerFunction. Adding a function is a
- * server-side change — neither the snippet nor this core changes.
+ * The Functions menu's "Settings" view (a settings panel with a
+ * section list on the left, VS Code style) enables and disables
+ * them in its Functions section; enabling loads the function's
+ * dependencies (in declared order) and its script, which
+ * registers its panel via window.RelayTool.registerFunction.
+ * Adding a function is a server-side change — neither the
+ * snippet nor this core changes.
  *
  * Components (tag names carry the core version — see below):
  *   <relay-tool-v0-5-0>           the floating window + menu bar
  *   <relay-function-list-v0-5-0>  left panel: the enabled functions
- *   <relay-config-panel-v0-5-0>   the Configure functions view
+ *   <relay-settings-panel-v0-6-0> the Settings view (sections)
  * Function panels are separate components with their own
  * versions, defined by the function scripts.
  *
@@ -35,7 +37,7 @@
  * are CSS, not JS.
  */
 (() => {
-  const VERSION = '0.5.0';
+  const VERSION = '0.6.0';
 
   // This exact version already loaded? Then there is nothing to
   // do — the same code is already registered under the same tags.
@@ -277,22 +279,54 @@
   }
 
   // ----------------------------------------------------------------
-  // <relay-config-panel-vX-Y-Z> — Configure functions: one row per
-  // catalog function (checkbox, name, version, description).
-  // Toggling a checkbox fires relay-function-toggle; the core does
-  // the loading and this panel re-renders from core state.
+  // <relay-settings-panel-vX-Y-Z> — the Settings view, laid out
+  // like an IDE settings page: a section list on the left, the
+  // selected section's settings on the right, and an × in the
+  // header that closes back to the previous view (it fires
+  // relay-settings-close; <relay-tool> handles the return).
+  //
+  // Sections are a small registry — one entry per section, its
+  // content rendered by _renderSection. The Functions section
+  // lists the catalog: one checkbox row per function (name,
+  // version, description). Toggling a checkbox fires
+  // relay-function-toggle; the core does the loading and this
+  // panel re-renders from core state.
   // ----------------------------------------------------------------
-  class RelayConfigPanel extends HTMLElement {
+  const SETTINGS_SECTIONS = [
+    { id: 'functions', label: 'Functions' },
+  ];
+
+  class RelaySettingsPanel extends HTMLElement {
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
+      this._section = SETTINGS_SECTIONS[0].id;
     }
 
     connectedCallback() {
       this.shadowRoot.innerHTML = `
         <style>
           ${panelCSS}
-          h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+          .settings { display: flex; flex-direction: column; }
+          .settings-head { flex: none; display: flex; align-items: center;
+                           gap: 0.5rem; margin-bottom: 0.4rem; }
+          .settings-head h3 { flex: 1; margin: 0; font-size: 0.95rem; }
+          .settings-head button { border: none; background: none;
+                                  font: inherit; cursor: pointer;
+                                  padding: 0 0.3rem; }
+          .settings-body { flex: 1; display: flex; min-height: 0; }
+          .sections { width: 118px; flex: none; padding-right: 0.5rem;
+                      border-right: 1px solid var(--rt-border, #ddd); }
+          .sections button { display: block; width: 100%; text-align: left;
+                             padding: 0.4rem 0.5rem; margin-bottom: 0.25rem;
+                             border: 1px solid transparent; border-radius: 6px;
+                             background: none; font: inherit; cursor: pointer;
+                             color: var(--rt-text, #222); }
+          .sections button:hover { background: var(--rt-hover, #e8e8ee); }
+          .sections button[aria-selected="true"] {
+            background: var(--rt-accent, #2f6fed); color: #fff; }
+          .section-content { flex: 1; min-width: 0; overflow-y: auto;
+                             padding-left: 0.7rem; }
           .row { display: flex; gap: 0.5rem; align-items: flex-start;
                  padding: 0.45rem 0.2rem;
                  border-bottom: 1px solid var(--rt-border, #eee); }
@@ -304,11 +338,35 @@
           .err { color: #b3261e; font-size: 0.85rem; }
           .note { color: var(--rt-muted, #777); }
         </style>
-        <div class="panel"><h3>Configure functions</h3><div class="rows"></div></div>`;
-      this._rows = this.shadowRoot.querySelector('.rows');
+        <div class="panel settings">
+          <div class="settings-head">
+            <h3>Settings</h3>
+            <button type="button" data-action="close-settings"
+                    aria-label="Close settings">✕</button>
+          </div>
+          <div class="settings-body">
+            <nav class="sections"></nav>
+            <div class="section-content"></div>
+          </div>
+        </div>`;
+      this._sectionsEl = this.shadowRoot.querySelector('.sections');
+      this._contentEl = this.shadowRoot.querySelector('.section-content');
       this._render();
       core.on(() => this._render());
       if (core.available === null) loadCatalog();
+      this.shadowRoot.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="close-settings"]')) {
+          this.dispatchEvent(new CustomEvent('relay-settings-close', {
+            bubbles: true, composed: true,
+          }));
+          return;
+        }
+        const btn = e.target.closest('button[data-section-id]');
+        if (btn) {
+          this._section = btn.dataset.sectionId;
+          this._render();
+        }
+      });
       this.shadowRoot.addEventListener('change', (e) => {
         const box = e.target.closest('input[type="checkbox"][data-function-id]');
         if (box) {
@@ -321,16 +379,23 @@
     }
 
     _render() {
+      this._sectionsEl.innerHTML = SETTINGS_SECTIONS.map((sec) => `
+        <button type="button" data-section-id="${sec.id}"
+                aria-selected="${String(this._section === sec.id)}"
+                >${sec.label}</button>`).join('');
+      this._contentEl.innerHTML = this._section === 'functions'
+        ? this._functionsHTML()
+        : '';
+    }
+
+    _functionsHTML() {
       if (core.available === null) {
-        this._rows.innerHTML = '<p class="note">Loading available functions…</p>';
-        return;
+        return '<p class="note">Loading available functions…</p>';
       }
       if (core.availableError) {
-        this._rows.innerHTML =
-          `<p class="err">Could not load the function list: ${core.availableError}</p>`;
-        return;
+        return `<p class="err">Could not load the function list: ${core.availableError}</p>`;
       }
-      this._rows.innerHTML = core.available.map((meta) => {
+      return core.available.map((meta) => {
         const entry = core.enabled.get(meta.id);
         const state = entry?.state ?? 'off';
         return `
@@ -353,7 +418,7 @@
   // <relay-tool-vX-Y-Z> — the floating window. Drag by the header
   // (pointer events), resize by the corner (pure CSS resize),
   // close with the × button. A menu bar under the header holds
-  // the Functions menu ("Configure functions…"). The body hosts
+  // the Functions menu ("Settings"). The body hosts
   // the function list on the left and the active view (a function
   // panel, the config panel, or an empty hint) on the right.
   // ----------------------------------------------------------------
@@ -435,7 +500,7 @@
             <div class="menu" data-open="false">
               <button type="button" data-action="menu" aria-haspopup="true">Functions</button>
               <div class="menu-dropdown" role="menu">
-                <button type="button" data-action="configure" role="menuitem">Configure functions…</button>
+                <button type="button" data-action="settings" role="menuitem">Settings</button>
               </div>
             </div>
           </div>
@@ -466,11 +531,20 @@
         .addEventListener('click', () => this.remove());
       this.shadowRoot.querySelector('[data-action="menu"]')
         .addEventListener('click', () => this._toggleMenu());
-      this.shadowRoot.querySelector('[data-action="configure"]')
+      this.shadowRoot.querySelector('[data-action="settings"]')
         .addEventListener('click', () => {
           this._closeMenu();
-          this.showConfig();
+          this.showSettings();
         });
+      this.addEventListener('relay-settings-close', () => {
+        const back = this._returnFunctionId;
+        this._returnFunctionId = null;
+        if (back && core.enabled.get(back)?.state === 'ready') {
+          this.showFunction(back);
+        } else {
+          this._showEmpty();
+        }
+      });
       this._onDocPointerDown = (e) => {
         if (!e.composedPath().includes(this._menu)) this._closeMenu();
       };
@@ -509,12 +583,18 @@
       core.emit();
     }
 
-    /** Show the Configure functions view. */
-    showConfig() {
-      this._view = 'config';
+    /** Show the Settings view, remembering the function to
+     *  return to when Settings closes (the × button). */
+    showSettings() {
+      if (this._view === 'function') {
+        this._returnFunctionId = core.activeId;
+      } else if (this._view !== 'settings') {
+        this._returnFunctionId = null;
+      }
+      this._view = 'settings';
       delete this.dataset.activeFunction;
       this._host.replaceChildren(
-        document.createElement(tag('relay-config-panel')));
+        document.createElement(tag('relay-settings-panel')));
     }
 
     _showEmpty() {
@@ -523,7 +603,7 @@
       const hint = document.createElement('div');
       hint.className = 'hint';
       hint.textContent =
-        'No function selected. Enable functions under Functions → Configure functions…';
+        'No function selected. Enable functions under Functions → Settings';
       this._host.replaceChildren(hint);
     }
 
@@ -555,7 +635,7 @@
   // Plain defines: the versioned names cannot collide with a
   // different version, and the same version returned early above.
   customElements.define(tag('relay-function-list'), RelayFunctionList);
-  customElements.define(tag('relay-config-panel'), RelayConfigPanel);
+  customElements.define(tag('relay-settings-panel'), RelaySettingsPanel);
   customElements.define(tag('relay-tool'), RelayTool);
 
   try {
