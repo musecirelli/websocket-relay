@@ -13,6 +13,10 @@
 //     file/FIFO named by -console (reopened on EOF, so a detached
 //     server can be fed one writer session at a time:
 //     `printf 'hi\n' > /path/to/fifo`).
+//   - It collects Assistant snapshots (assistant.go): the latest
+//     completed snapshot is written as JSON to -assistant-file,
+//     and streamed console entries are appended to
+//     -assistant-log.
 //
 // Run (from the repo root): make run-remote
 package main
@@ -37,8 +41,8 @@ import (
 // logHook logs broker connects/disconnects for the operator.
 type logHook struct{ mqtt.HookBase }
 
-func (h *logHook) ID() string               { return "operator-log" }
-func (h *logHook) Provides(b byte) bool     { return b == mqtt.OnConnect || b == mqtt.OnDisconnect }
+func (h *logHook) ID() string           { return "operator-log" }
+func (h *logHook) Provides(b byte) bool { return b == mqtt.OnConnect || b == mqtt.OnDisconnect }
 func (h *logHook) OnConnect(cl *mqtt.Client, pk packets.Packet) error {
 	log.Printf("[mqtt connect] %s", cl.ID)
 	return nil
@@ -70,6 +74,10 @@ func main() {
 	wsPort := flag.Int("ws-port", 8083, "MQTT-over-WebSocket listen port (all interfaces)")
 	console := flag.String("console", "",
 		"read operator lines from this file/FIFO instead of stdin (reopened on EOF)")
+	assistantFile := flag.String("assistant-file", "assistant-snapshot.json",
+		"write the latest Assistant snapshot (JSON) to this file")
+	assistantLog := flag.String("assistant-log", "assistant-console.log",
+		"append streamed Assistant console entries (JSON lines) to this file")
 	flag.Parse()
 
 	broker, err := mqttx.NewBroker(fmt.Sprintf(":%d", *port), fmt.Sprintf(":%d", *wsPort))
@@ -91,6 +99,33 @@ func main() {
 		log.Fatalf("chat subscribe: %v", err)
 	}
 
+	collector := newAssistantCollector(*assistantFile, *assistantLog)
+	if err := broker.Subscribe("assistant/+/snapshot", 3,
+		func(cl *mqtt.Client, sub packets.Subscription, pk packets.Packet) {
+			info, err := collector.handleSnapshot(pk.Payload)
+			if err != nil {
+				log.Printf("[assistant] %v", err)
+				return
+			}
+			if info != nil {
+				log.Printf("[assistant] snapshot %s from %s: %s (%d bytes)",
+					info.ID, userFromTopic(pk.TopicName), info.URL, info.Bytes)
+			}
+		}); err != nil {
+		log.Fatalf("assistant snapshot subscribe: %v", err)
+	}
+	if err := broker.Subscribe("assistant/+/console", 4,
+		func(cl *mqtt.Client, sub packets.Subscription, pk packets.Packet) {
+			summary, err := collector.handleConsole(pk.Payload)
+			if err != nil {
+				log.Printf("[assistant] console: %v", err)
+				return
+			}
+			log.Printf("[assistant-console] %s: %s", userFromTopic(pk.TopicName), summary)
+		}); err != nil {
+		log.Fatalf("assistant console subscribe: %v", err)
+	}
+
 	go func() {
 		if err := broker.Serve(); err != nil {
 			log.Fatalf("serve: %v", err)
@@ -99,6 +134,7 @@ func main() {
 
 	fmt.Printf("Remote Server — MQTT broker tcp :%d, ws :%d\n", *port, *wsPort)
 	fmt.Println("Chat user \"remote\". Type a line and press Enter to reply to the last sender. Ctrl+C stops.")
+	fmt.Printf("Assistant: latest snapshot -> %s, console stream -> %s\n", *assistantFile, *assistantLog)
 
 	if *console != "" {
 		operatorFile(broker, op, *console)
