@@ -11,6 +11,9 @@
 //   - Chat is topics chat/<username>: subscribe to your own topic;
 //     to message someone, publish a chat.message JSON-RPC
 //     notification (params {from, text}) to their topic.
+//   - Script delivery is topics scripts/<username>: subscribe to
+//     your own topic; a script arrives as a script.deliver JSON-RPC
+//     notification (params {from, name, description, script}).
 package mqttx
 
 import (
