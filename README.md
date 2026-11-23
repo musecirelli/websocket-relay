@@ -193,7 +193,7 @@ in the tool's header). The client snippet — itself just a loader —
 fetches and evaluates it; the loader is infrastructure and is not
 one of the tool's functions.
 
-Tag names are **version-suffixed** (`relay-tool-v0-6-0`, …): a
+Tag names are **version-suffixed** (`relay-tool-v0-7-0`, …): a
 custom element name can only be defined once per page, so
 versioning the names lets different versions coexist on one page
 without colliding. Core tags use the core's version; function
@@ -204,15 +204,20 @@ the addresses). There is no retry/increment machinery: refresh
 the page for a clean slate.
 
 The core ships with **no functions**. A menu bar under the header
-holds a **Functions** menu; its **Settings** item swaps the main
-panel to a Settings view laid out like an IDE settings page — a
-section list on the left, the selected section's settings on the
-right, and an × in its header that closes back to the previous
-view. The **Functions** section lists the functions
-localhostServer offers. Checking a function adds it to the
-function list — grayed out while it loads, live once loaded;
+holds a **File** menu; its **Settings** item opens a Settings
+view that takes over the whole tool body (the function list
+hides too) until its × closes it, laid out like an IDE settings
+page — a section list on the left, the selected section's
+settings on the right. The **Functions** section lists the
+functions localhostServer offers. Checking a function adds it to
+the function list — grayed out while it loads, live once loaded;
 unchecking removes it. The enabled set persists in the host
 page's `localStorage` and is restored on the next load.
+
+Switching between functions hides the previous panel rather than
+destroying it, so a function's state — a chat connection, a log —
+survives switching away and back. Disabling a function destroys
+its panel.
 
 How the catalog works: the tool asks localhostServer for the
 function list over JSON-RPC (`functions.list`, see Protocol) and
@@ -232,7 +237,7 @@ in CSS):
 
 - `<relay-tool>` — the floating window: drag by the header,
   resize by the corner (CSS `resize`), close with ×, plus the
-  menu bar.
+  menu bar (File → Settings).
 - `<relay-function-list>` — left panel listing the *enabled*
   functions from core state; entries carry a `data-state`
   (`loading` grayed and inert, `error` red, `ready` clickable).
@@ -373,7 +378,7 @@ is O(1).
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
 - [x] Loadable Relay Tool functions: the core ships empty;
-      Functions → Settings enables functions from
+      File → Settings enables functions from
       localhostServer's catalog (functions.list) — no redeploy
 - [ ] More Relay Tool functions
 - [ ] Chat users and presence (beyond the two-user test setup)
