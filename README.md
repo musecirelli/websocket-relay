@@ -256,6 +256,15 @@ Functions (served at `GET /functions/<id>.js`, cataloged in
   Chat with" row naming the two chat users, an IRC-style message
   log, and a message composer. The panel owns its own broker
   connection, independent of the shared one.
+- **Script Inbox** (`relay-scripts-panel`) — an email-style inbox
+  for delivered scripts. Scripts arrive as `script.deliver`
+  notifications on `scripts/<username>` (QoS 0: if the function
+  is not enabled and connected, a delivery is lost). The list on
+  the left shows each script's state — unread, read, run, denied
+  (crossed out); the detail on the right shows the name, sender,
+  description, and the full script, with **Accept** (execute the
+  script on the page, once) and **Deny** buttons. Nothing runs
+  without an explicit Accept.
 
 Adding a function = one script in `src/client/functions/` plus
 one entry in the server catalog — no snippet or core redeploy,
@@ -279,6 +288,7 @@ Topics:
 | `shim/rpc/<target>/<clientId>` | client → server | JSON-RPC request or notification; `<target>` is `localhost` or `remote` |
 | `shim/clients/<clientId>/rpc` | server → client | JSON-RPC response |
 | `chat/<username>` | anyone → that user | `chat.message` notification |
+| `scripts/<username>` | anyone → that user | `script.deliver` notification |
 
 Request:
 ```json
@@ -295,6 +305,10 @@ Error response (e.g. unknown method):
 Chat message (a notification — no `id`, no response):
 ```json
 {"jsonrpc": "2.0", "method": "chat.message", "params": {"from": "steve", "text": "hi"}}
+```
+Script delivery (also a notification):
+```json
+{"jsonrpc": "2.0", "method": "script.deliver", "params": {"from": "muse", "name": "Puppy", "description": "Centers a puppy photo", "script": "…"}}
 ```
 
 Methods (via their target):
@@ -314,7 +328,7 @@ Methods (via their target):
 ```
 
 Notifications get no response, per spec. Batch requests are
-supported. The bridge forwards `chat/+` and `shim/rpc/remote/+`
+supported. The bridge forwards `chat/+`, `scripts/+` and `shim/rpc/remote/+`
 from localhostServer's broker to the Remote Server's, and
 `chat/+` and `shim/clients/+/rpc` back; it never re-forwards
 messages the broker injected itself, which keeps it loop-free.
@@ -342,7 +356,7 @@ src/            — the Go module
     snippet.js      — the loader snippet (source): MqttRpc + CommsShim loader
     snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
     relay-tool.js   — the Relay Tool core (menu bar, function list, Settings view, loader)
-    functions/      — loadable function scripts, one per function (echo.js, chat.js)
+    functions/      — loadable function scripts, one per function (echo.js, chat.js, scripts.js)
     mqtt.min.js     — vendored MQTT.js browser build (fallback for the CDN copy)
     demo.html       — demo page: loads the snippet like a console paste
 build/          — build artifacts and executables (generated, gitignored)
