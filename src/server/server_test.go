@@ -214,7 +214,7 @@ func TestFunctionFilesServed(t *testing.T) {
 }
 
 func TestGUIServesSnippetWithStamps(t *testing.T) {
-	url, err := startGUI("127.0.0.1", "ws://127.0.0.1:8083", "http://127.0.0.1:8765")
+	url, err := startGUI("127.0.0.1", "127.0.0.1", 8083, 8765)
 	require.NoError(t, err)
 
 	resp, err := http.Get(url + "/")
@@ -228,4 +228,39 @@ func TestGUIServesSnippetWithStamps(t *testing.T) {
 	for _, ph := range []string{"__BROKER_URL__", "__ASSET_BASE__", "__RELAY_TOOL_VERSION__"} {
 		assert.NotContains(t, page, ph, "placeholder %s must be stamped", ph)
 	}
+}
+
+// getGUIPage fetches a started GUI's page with an explicit Host
+// header, as a browser on another machine would send it.
+func getGUIPage(t *testing.T, url, host string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url+"/", nil)
+	require.NoError(t, err)
+	req.Host = host
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
+}
+
+func TestGUIStampsRequestHostWhenBindIsWildcard(t *testing.T) {
+	url, err := startGUI("127.0.0.1", "", 8083, 8765)
+	require.NoError(t, err)
+
+	page := getGUIPage(t, url, "192.0.2.10:46139")
+	assert.Contains(t, page, "ws://192.0.2.10:8083",
+		"with no stamp host, the snippet names the host the browser used")
+	assert.Contains(t, page, "http://192.0.2.10:8765")
+	assert.NotContains(t, page, "0.0.0.0")
+}
+
+func TestGUIStampHostOverridesRequestHost(t *testing.T) {
+	url, err := startGUI("127.0.0.1", "203.0.113.7", 8083, 8765)
+	require.NoError(t, err)
+
+	page := getGUIPage(t, url, "192.0.2.10:46139")
+	assert.Contains(t, page, "ws://203.0.113.7:8083",
+		"an explicit stamp host (-public-host) wins over the request Host")
 }

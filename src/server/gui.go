@@ -8,6 +8,7 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
 	"log"
 	"net"
@@ -32,13 +33,17 @@ const (
 )
 
 // startGUI starts the GUI listener on host with a random port and
-// returns its URL, e.g. "http://127.0.0.1:51234".
-func startGUI(host, brokerURL, assetBase string) (string, error) {
+// returns its URL, e.g. "http://127.0.0.1:51234". stampHost is the
+// host written into the snippet's broker URL and asset base; when
+// empty, each page request stamps the host the browser used to
+// reach the GUI (the bind host is then 0.0.0.0, which no client
+// can connect to).
+func startGUI(host, stampHost string, wsPort, httpPort int) (string, error) {
 	ln, err := net.Listen("tcp", host+":0")
 	if err != nil {
 		return "", err
 	}
-	g := &gui{brokerURL: brokerURL, assetBase: assetBase}
+	g := &gui{stampHost: stampHost, wsPort: wsPort, httpPort: httpPort}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", g.page)
 	go func() {
@@ -50,8 +55,25 @@ func startGUI(host, brokerURL, assetBase string) (string, error) {
 }
 
 type gui struct {
-	brokerURL string // MQTT-over-WebSocket URL, e.g. "ws://127.0.0.1:8083"
-	assetBase string // HTTP asset base, e.g. "http://127.0.0.1:8765"
+	stampHost string // host stamped into the snippet; "" = the request's Host
+	wsPort    int    // MQTT-over-WebSocket broker port
+	httpPort  int    // HTTP asset port
+}
+
+// connectHost resolves the host the snippet should connect to:
+// the configured stamp host, else the host the browser used to
+// reach this GUI page, else loopback.
+func (g *gui) connectHost(r *http.Request) string {
+	if g.stampHost != "" {
+		return g.stampHost
+	}
+	if h, _, err := net.SplitHostPort(r.Host); err == nil && h != "" {
+		return h
+	}
+	if r.Host != "" {
+		return r.Host
+	}
+	return "127.0.0.1"
 }
 
 // page renders the snippet page. Rendering is O(n) in snippet size.
@@ -64,12 +86,15 @@ func (g *gui) page(w http.ResponseWriter, r *http.Request) {
 	// serve-time rewrites (all string literals, untouched by
 	// compilation): the broker URL, the asset base, and the Relay
 	// Tool version this server serves.
-	snippet := strings.ReplaceAll(relay.ClientSnippetMin, brokerPlaceholder, g.brokerURL)
-	snippet = strings.ReplaceAll(snippet, assetPlaceholder, g.assetBase)
+	host := g.connectHost(r)
+	brokerURL := fmt.Sprintf("ws://%s:%d", host, g.wsPort)
+	assetBase := fmt.Sprintf("http://%s:%d", host, g.httpPort)
+	snippet := strings.ReplaceAll(relay.ClientSnippetMin, brokerPlaceholder, brokerURL)
+	snippet = strings.ReplaceAll(snippet, assetPlaceholder, assetBase)
 	snippet = strings.ReplaceAll(snippet, toolVersionPlaceholder, RelayToolVersion)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := guiPage.Execute(w, map[string]string{
-		"BrokerURL": g.brokerURL,
+		"BrokerURL": brokerURL,
 		"Snippet":   snippet,
 	}); err != nil {
 		log.Printf("[gui] render error: %v", err)
