@@ -55,26 +55,31 @@ build-release: $(MIN_SNIPPET) ## Production build (server + Remote Server): stat
 # HOST sets localhostServer's bind address (the server's -host
 # flag; default 127.0.0.1, loopback only). HOST=0.0.0.0 exposes
 # the broker, asset server, and GUI on all interfaces.
+# PUBLIC_HOST sets the host the snippet connects to (the server's
+# -public-host flag). With HOST=0.0.0.0 and no PUBLIC_HOST, the
+# GUI stamps the address the browser loaded the GUI from.
 HOST ?=
 HOST_FLAG := $(if $(HOST),-host $(HOST),)
+PUBLIC_HOST ?=
+PUBLIC_HOST_FLAG := $(if $(PUBLIC_HOST),-public-host $(PUBLIC_HOST),)
 
-run: $(MIN_SNIPPET) ## Run for debugging (race detector, nothing kept) [HOST=<addr>]
-	cd $(SRC) && $(GO) run -race ./server $(HOST_FLAG)
+run: $(MIN_SNIPPET) ## Run for debugging (race detector, nothing kept) [HOST=<addr>] [PUBLIC_HOST=<addr>]
+	cd $(SRC) && $(GO) run -race ./server $(HOST_FLAG) $(PUBLIC_HOST_FLAG)
 
 # REMOTE_HOST names the Remote Server (IP or domain) the bridge
 # connects to; REMOTE_PORT overrides its MQTT port (default 1883).
 REMOTE_HOST ?=
 REMOTE_PORT ?=
 
-run-bridge: $(MIN_SNIPPET) ## Run localhostServer bridged to a Remote Server: make run-bridge REMOTE_HOST=<host> [REMOTE_PORT=<port>] [HOST=<addr>]
+run-bridge: $(MIN_SNIPPET) ## Run localhostServer bridged to a Remote Server: make run-bridge REMOTE_HOST=<host> [REMOTE_PORT=<port>] [HOST=<addr>] [PUBLIC_HOST=<addr>]
 	@if [ -z "$(REMOTE_HOST)" ]; then \
 		echo "REMOTE_HOST is required, e.g.: make run-bridge REMOTE_HOST=192.0.2.10"; \
 		exit 1; \
 	fi
-	cd $(SRC) && $(GO) run -race ./server -remote-host $(REMOTE_HOST) $(if $(REMOTE_PORT),-remote-mqtt-port $(REMOTE_PORT),) $(HOST_FLAG)
+	cd $(SRC) && $(GO) run -race ./server -remote-host $(REMOTE_HOST) $(if $(REMOTE_PORT),-remote-mqtt-port $(REMOTE_PORT),) $(HOST_FLAG) $(PUBLIC_HOST_FLAG)
 
-run-release: build-release ## Build the production binary and run it [HOST=<addr>]
-	./$(RELEASE) $(HOST_FLAG)
+run-release: build-release ## Build the production binary and run it [HOST=<addr>] [PUBLIC_HOST=<addr>]
+	./$(RELEASE) $(HOST_FLAG) $(PUBLIC_HOST_FLAG)
 
 run-remote: ## Run the Remote Server for debugging
 	cd $(SRC) && $(GO) run ./remoteserver

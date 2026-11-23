@@ -23,6 +23,8 @@ import (
 
 func main() {
 	host := flag.String("host", "127.0.0.1", "bind host")
+	publicHost := flag.String("public-host", "",
+		"host the snippet connects to (default: -host, or the GUI request's host when -host is 0.0.0.0)")
 	port := flag.Int("port", 8765, "HTTP asset port (/health, /relay-tool.js, /mqtt.min.js)")
 	mqttTCP := flag.Int("mqtt-tcp", 1883, "MQTT TCP broker port")
 	mqttWS := flag.Int("mqtt-ws", 8083, "MQTT-over-WebSocket broker port")
@@ -60,14 +62,24 @@ func main() {
 		}
 	}()
 
-	brokerURL := fmt.Sprintf("ws://%s:%d", *host, *mqttWS)
-	assetBase := fmt.Sprintf("http://%s:%d", *host, *port)
-	guiURL, err := startGUI(*host, brokerURL, assetBase)
+	// The snippet must name a host clients can connect to. The
+	// bind host only qualifies when it is a concrete address:
+	// with -host 0.0.0.0 the GUI stamps each request's Host
+	// instead (or -public-host, when set).
+	stampHost := *publicHost
+	if stampHost == "" && *host != "0.0.0.0" && *host != "::" {
+		stampHost = *host
+	}
+	guiURL, err := startGUI(*host, stampHost, *mqttWS, *port)
 	if err != nil {
 		log.Printf("[gui] failed to start: %v", err)
 		guiURL = "(unavailable)"
 	}
 
+	assetBase := fmt.Sprintf("http://%s:%d", *host, *port)
+	if stampHost != "" {
+		assetBase = fmt.Sprintf("http://%s:%d", stampHost, *port)
+	}
 	fmt.Println("Comms Shim — localhostServer")
 	fmt.Printf("  MQTT broker: tcp %s, ws %s\n", tcpAddr, wsAddr)
 	fmt.Printf("  Assets: %s (/relay-tool.js, /mqtt.min.js)\n", assetBase)

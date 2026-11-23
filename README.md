@@ -157,6 +157,16 @@ instead, pass HOST to any run target:
 make run-bridge REMOTE_HOST=192.0.2.10 HOST=0.0.0.0
 ```
 
+The snippet the GUI hands out must name a host clients can
+connect to, so it is never stamped with 0.0.0.0: with
+HOST=0.0.0.0 it carries the address the browser used to load
+the GUI. To stamp a specific address instead — a LAN IP or a
+hostname — pass PUBLIC_HOST as well:
+
+```sh
+make run-bridge REMOTE_HOST=192.0.2.10 HOST=0.0.0.0 PUBLIC_HOST=192.0.2.20
+```
+
 In the Relay Tool's Chat
 panel, the Broker field defaults to localhostServer's broker —
 chat then flows over the bridge. The field also accepts the
