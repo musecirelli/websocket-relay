@@ -1,5 +1,5 @@
 /**
- * Comms Shim — Relay Tool v0.6.0 (core)
+ * Comms Shim — Relay Tool v0.7.0 (core)
  *
  * Served by localhostServer (GET /relay-tool.js) and loaded by the
  * client snippet. A floating tool window built from standard web
@@ -9,7 +9,7 @@
  * localhostServer catalogs them (JSON-RPC functions.list —
  * metadata: id, name, version, description, script URL,
  * dependencies) and serves each script at /functions/<id>.js.
- * The Functions menu's "Settings" view (a settings panel with a
+ * The File menu's "Settings" view (a settings panel with a
  * section list on the left, VS Code style) enables and disables
  * them in its Functions section; enabling loads the function's
  * dependencies (in declared order) and its script, which
@@ -20,7 +20,7 @@
  * Components (tag names carry the core version — see below):
  *   <relay-tool-v0-5-0>           the floating window + menu bar
  *   <relay-function-list-v0-5-0>  left panel: the enabled functions
- *   <relay-settings-panel-v0-6-0> the Settings view (sections)
+ *   <relay-settings-panel-v0-7-0> the Settings view (sections)
  * Function panels are separate components with their own
  * versions, defined by the function scripts.
  *
@@ -37,7 +37,7 @@
  * are CSS, not JS.
  */
 (() => {
-  const VERSION = '0.6.0';
+  const VERSION = '0.7.0';
 
   // This exact version already loaded? Then there is nothing to
   // do — the same code is already registered under the same tags.
@@ -418,7 +418,7 @@
   // <relay-tool-vX-Y-Z> — the floating window. Drag by the header
   // (pointer events), resize by the corner (pure CSS resize),
   // close with the × button. A menu bar under the header holds
-  // the Functions menu ("Settings"). The body hosts
+  // the File menu ("Settings"). The body hosts
   // the function list on the left and the active view (a function
   // panel, the config panel, or an empty hint) on the right.
   // ----------------------------------------------------------------
@@ -488,6 +488,10 @@
           ${tag('relay-function-list')} { width: 150px; flex: none; }
           .host { flex: 1; min-width: 0; }
           .hint { padding: 0.8rem; color: var(--rt-muted, #777); }
+          .settings-host { display: none; }
+          .window[data-view="settings"] main { display: none; }
+          .window[data-view="settings"] .settings-host {
+            display: block; flex: 1; min-height: 0; }
         </style>
         <div class="window">
           <header part="header">
@@ -498,7 +502,7 @@
           </header>
           <div class="menubar">
             <div class="menu" data-open="false">
-              <button type="button" data-action="menu" aria-haspopup="true">Functions</button>
+              <button type="button" data-action="menu" aria-haspopup="true">File</button>
               <div class="menu-dropdown" role="menu">
                 <button type="button" data-action="settings" role="menuitem">Settings</button>
               </div>
@@ -508,11 +512,19 @@
             <${tag('relay-function-list')}></${tag('relay-function-list')}>
             <div class="host" part="panel-host"></div>
           </main>
+          <div class="settings-host" part="settings-host"></div>
         </div>`;
 
+      this._window = this.shadowRoot.querySelector('.window');
       this._host = this.shadowRoot.querySelector('.host');
+      this._settingsHost = this.shadowRoot.querySelector('.settings-host');
       this._menu = this.shadowRoot.querySelector('.menu');
       this._view = 'empty';
+      this._panels = new Map(); // function id -> panel element (kept alive)
+      this._hintEl = document.createElement('div');
+      this._hintEl.className = 'hint';
+      this._hintEl.textContent =
+        'No function selected. Enable functions under File → Settings';
 
       this.addEventListener('relay-function-select', (e) =>
         this.showFunction(e.detail.id));
@@ -521,6 +533,13 @@
         else disableFunction(e.detail.id);
       });
       core.on(() => {
+        // A disabled function's panel is destroyed with it.
+        for (const [id, el] of this._panels) {
+          if (!core.enabled.has(id)) {
+            el.remove();
+            this._panels.delete(id);
+          }
+        }
         // If the visible function went away, fall back to the hint.
         if (this._view === 'function' && !core.enabled.has(core.activeId)) {
           this._showEmpty();
@@ -572,19 +591,38 @@
       this._menu.dataset.open = 'false';
     }
 
-    /** Show the panel of an enabled, ready function. */
+    /**
+     * Show the panel of an enabled, ready function. Panels are
+     * created once and then only hidden/shown — switching away
+     * never destroys a panel, so its state (a chat connection,
+     * a scrollback, a half-typed message) is still there when
+     * you switch back. Disabling the function destroys it.
+     */
     showFunction(id) {
       const entry = core.enabled.get(id);
       if (!entry || entry.state !== 'ready') return;
+      delete this._window.dataset.view;
+      let el = this._panels.get(id);
+      if (!el) {
+        el = document.createElement(entry.tag);
+        this._panels.set(id, el);
+        this._host.appendChild(el);
+      }
+      this._hintEl.remove();
+      for (const [pid, panel] of this._panels) {
+        panel.style.display = pid === id ? '' : 'none';
+      }
       core.activeId = id;
       this._view = 'function';
       this.dataset.activeFunction = id;
-      this._host.replaceChildren(document.createElement(entry.tag));
       core.emit();
     }
 
-    /** Show the Settings view, remembering the function to
-     *  return to when Settings closes (the × button). */
+    /** Show the Settings view — it takes over the whole body
+     *  (data-view="settings" hides <main>, function list and
+     *  all) — remembering the function to return to when
+     *  Settings closes (the × button). Panels stay alive
+     *  underneath, so a chat in progress is not interrupted. */
     showSettings() {
       if (this._view === 'function') {
         this._returnFunctionId = core.activeId;
@@ -593,18 +631,19 @@
       }
       this._view = 'settings';
       delete this.dataset.activeFunction;
-      this._host.replaceChildren(
+      this._window.dataset.view = 'settings';
+      this._settingsHost.replaceChildren(
         document.createElement(tag('relay-settings-panel')));
     }
 
     _showEmpty() {
       this._view = 'empty';
       delete this.dataset.activeFunction;
-      const hint = document.createElement('div');
-      hint.className = 'hint';
-      hint.textContent =
-        'No function selected. Enable functions under Functions → Settings';
-      this._host.replaceChildren(hint);
+      delete this._window.dataset.view;
+      for (const panel of this._panels.values()) {
+        panel.style.display = 'none';
+      }
+      this._host.appendChild(this._hintEl);
     }
 
     _dragSetup(handle) {
