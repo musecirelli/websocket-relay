@@ -157,6 +157,12 @@ class MqttRpc {
     this.client?.unsubscribe(topic);
   }
 
+  /** Publish a raw payload (object or string) to an arbitrary topic. */
+  publishTopic(topic, payload) {
+    this.client?.publish(topic,
+      typeof payload === 'string' ? payload : JSON.stringify(payload));
+  }
+
   /** Subscribe to my chat topic: chat/<name>. */
   setChatUser(name) {
     if (this.chatUser === name) return;
