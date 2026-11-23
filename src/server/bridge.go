@@ -4,12 +4,14 @@
 // localhostServer initiates the bridge (Steve's design: it
 // publishes messages to the Remote Server). Two flows, both QoS 0:
 //
-//   - Out (hook): when a local client publishes on chat/<user> or
-//     shim/rpc/remote/<clientId>, the bridge hook republishes it
-//     to the Remote broker over the uplink client.
+//   - Out (hook): when a local client publishes on chat/<user>,
+//     scripts/<user> or shim/rpc/remote/<clientId>, the bridge
+//     hook republishes it to the Remote broker over the uplink
+//     client.
 //   - Back (uplink subscription): the uplink subscribes on the
-//     Remote broker to chat/+ and shim/clients/+/rpc and injects
-//     what arrives into the local broker as inline publishes.
+//     Remote broker to chat/+, scripts/+ and shim/clients/+/rpc
+//     and injects what arrives into the local broker as inline
+//     publishes.
 //
 // Loop-freedom: the hook never forwards publishes that originated
 // from the broker's inline client — which is exactly how the
@@ -41,16 +43,17 @@ func (h *bridgeHook) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Pack
 	if h.uplink == nil || !h.uplink.IsConnected() {
 		return pk, nil
 	}
-	if isChatTopic(pk.TopicName) || strings.HasPrefix(pk.TopicName, "shim/rpc/remote/") {
+	if isUserTopic(pk.TopicName, "chat") || isUserTopic(pk.TopicName, "scripts") ||
+		strings.HasPrefix(pk.TopicName, "shim/rpc/remote/") {
 		h.uplink.Publish(pk.TopicName, 0, false, pk.Payload)
 	}
 	return pk, nil
 }
 
-// isChatTopic reports whether t is exactly chat/<user>.
-func isChatTopic(t string) bool {
+// isUserTopic reports whether t is exactly <prefix>/<user>.
+func isUserTopic(t, prefix string) bool {
 	parts := strings.Split(t, "/")
-	return len(parts) == 2 && parts[0] == "chat" && parts[1] != ""
+	return len(parts) == 2 && parts[0] == prefix && parts[1] != ""
 }
 
 // startUplink connects the bridge in the background: it retries
@@ -78,7 +81,7 @@ func dialUplink(local *mqtt.Server, remoteURL string) (paho.Client, error) {
 	opts := paho.NewClientOptions().AddBroker(remoteURL).SetClientID("localhostserver-bridge")
 	opts.SetAutoReconnect(true)
 	opts.SetOnConnectHandler(func(c paho.Client) {
-		for _, filter := range []string{"chat/+", "shim/clients/+/rpc"} {
+		for _, filter := range []string{"chat/+", "scripts/+", "shim/clients/+/rpc"} {
 			if t := c.Subscribe(filter, 0, nil); t.Wait() && t.Error() != nil {
 				log.Printf("[bridge] subscribe %s: %v", filter, t.Error())
 			}

@@ -58,6 +58,14 @@ var functionCatalog = []FunctionMeta{
 		Script:      "/functions/chat.js",
 		Dependencies: []FunctionDep{},
 	},
+	{
+		ID:          "scripts",
+		Name:        "Script Inbox",
+		Version:     "1.0.0",
+		Description: "An inbox for delivered scripts (script.deliver on scripts/<username>): review one, then Accept to run it on the page or Deny it.",
+		Script:      "/functions/scripts.js",
+		Dependencies: []FunctionDep{},
+	},
 }
 
 // functionsListHandler answers the functions.list RPC method with

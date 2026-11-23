@@ -11,6 +11,7 @@
  *   requests   -> shim/rpc/<target>/<clientId>
  *   responses  <- shim/clients/<clientId>/rpc
  *   chat       -> chat/<username>   (chat.message notifications)
+ *   scripts    -> scripts/<username> (script.deliver notifications)
  *
  * What it exposes on window:
  *   CommsShim  — { rpc, loadScript, loadRelayTool, connect,
@@ -144,6 +145,16 @@ class MqttRpc {
     }
     set.add(handler);
     return () => set.delete(handler);
+  }
+
+  /** Subscribe to an arbitrary topic on this connection. */
+  subscribeTopic(topic) {
+    this.client?.subscribe(topic);
+  }
+
+  /** Unsubscribe from an arbitrary topic. */
+  unsubscribeTopic(topic) {
+    this.client?.unsubscribe(topic);
   }
 
   /** Subscribe to my chat topic: chat/<name>. */
