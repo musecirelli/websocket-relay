@@ -102,7 +102,7 @@ Comms Shim — localhostServer
   Assets: http://127.0.0.1:8765 (/relay-tool.js, /mqtt.min.js)
   GUI: http://127.0.0.1:51234        <- example; your port will differ
   Bridge to Remote Server: on -> tcp://192.0.2.10:1883
-  methods (target localhost): [echo ping]
+  methods (target localhost): [echo functions.list ping]
 ```
 
 Leave it running; Ctrl+C stops it. The bridge connects in the
@@ -193,34 +193,64 @@ in the tool's header). The client snippet — itself just a loader —
 fetches and evaluates it; the loader is infrastructure and is not
 one of the tool's functions.
 
-The tool's tag names are **version-suffixed** (`relay-tool-v0-4-0`,
-`relay-echo-panel-v0-4-0`, …): a custom element name can only be
-defined once per page, so versioning the names lets different tool
-versions coexist on one page without colliding — every tag lookup
-in the tool is computed from its version. The GUI stamps the
-expected version into the snippet it serves (same serve-time
-rewrite as the addresses). There is no retry/increment machinery:
-refresh the page for a clean slate.
+Tag names are **version-suffixed** (`relay-tool-v0-5-0`, …): a
+custom element name can only be defined once per page, so
+versioning the names lets different versions coexist on one page
+without colliding. Core tags use the core's version; function
+panels use their own function's version, so functions version
+independently of the core. The GUI stamps the expected core
+version into the snippet it serves (same serve-time rewrite as
+the addresses). There is no retry/increment machinery: refresh
+the page for a clean slate.
 
-Components (all vanilla custom elements; communication via custom
-elements, `data-` attributes, and CustomEvents; animations in CSS):
+The core ships with **no functions**. A menu bar under the header
+holds a **Functions** menu; its **Configure functions…** item
+swaps the main panel to a configuration view listing the
+functions localhostServer offers. Checking a function adds it to
+the function list — grayed out while it loads, live once loaded;
+unchecking removes it. The enabled set persists in the host
+page's `localStorage` and is restored on the next load.
 
-- `<relay-tool>` — the floating window: drag by the header, resize
-  by the corner (CSS `resize`), close with ×.
-- `<relay-function-list>` — left panel listing the functions from a
-  registry; clicking one marks it active and fires
-  `relay-function-select`.
-- `<relay-echo-panel>` — the Echo function: text field, a target
-  selector (`localhost` / `remote`), Send button, readonly log.
-- `<relay-chat-panel>` — the Chat function: a broker row (broker
-  URL input, connect button, red/yellow/green status light), a
-  "You are / Chat with" row naming the two chat users, an
-  IRC-style message log, and a message composer. The panel owns
-  its own broker connection, independent of the shared one.
+How the catalog works: the tool asks localhostServer for the
+function list over JSON-RPC (`functions.list`, see Protocol) and
+gets metadata per function — `id`, `name`, `version`,
+`description`, `script` URL, and `dependencies` (each a
+`{type, url}` entry, `script` or `style`). On enable, the loader
+fetches the dependencies in declared order, then the function
+script; the script defines its panel component and registers it
+with the core via `window.RelayTool.registerFunction`. The
+loader memoizes by URL, so a dependency shared by several
+functions loads once per page; repeat loads across pages are the
+HTTP cache's job. There is no separate dependency manager.
 
-Adding a function = one entry in the registry in
-`src/client/relay-tool.js` plus one panel component — the same
-Registry pattern as the server's method Dispatcher.
+Core components (all vanilla custom elements; communication via
+custom elements, `data-` attributes, and CustomEvents; animations
+in CSS):
+
+- `<relay-tool>` — the floating window: drag by the header,
+  resize by the corner (CSS `resize`), close with ×, plus the
+  menu bar.
+- `<relay-function-list>` — left panel listing the *enabled*
+  functions from core state; entries carry a `data-state`
+  (`loading` grayed and inert, `error` red, `ready` clickable).
+  Clicking a ready entry fires `relay-function-select`.
+- `<relay-config-panel>` — the Configure functions view: one
+  checkbox row per catalog function.
+
+Functions (served at `GET /functions/<id>.js`, cataloged in
+`src/server/functions.go`):
+
+- **Echo** (`relay-echo-panel`) — text field, a target selector
+  (`localhost` / `remote`), Send button, readonly log.
+- **Chat** (`relay-chat-panel`) — a broker row (broker URL input,
+  connect button, red/yellow/green status light), a "You are /
+  Chat with" row naming the two chat users, an IRC-style message
+  log, and a message composer. The panel owns its own broker
+  connection, independent of the shared one.
+
+Adding a function = one script in `src/client/functions/` plus
+one entry in the server catalog — no snippet or core redeploy,
+the same Registry pattern as the server's method Dispatcher.
 
 **Snippet compilation:** the GUI hands out the snippet compiled by
 Google Closure Compiler (`src/client/snippet.min.js`, committed).
@@ -258,12 +288,21 @@ Chat message (a notification — no `id`, no response):
 {"jsonrpc": "2.0", "method": "chat.message", "params": {"from": "steve", "text": "hi"}}
 ```
 
-Methods (both servers, via their target):
+Methods (via their target):
 
 | Method | Params | Result |
 |---|---|---|
 | `echo` | anything | params, verbatim |
 | `ping` | — | `"pong"` |
+| `functions.list` | — | the function catalog (localhostServer only) |
+
+`functions.list` returns an array of function metadata objects:
+
+```json
+[{"id": "echo", "name": "Echo", "version": "1.0.0",
+  "description": "Send a message, get it echoed back",
+  "script": "/functions/echo.js", "dependencies": []}]
+```
 
 Notifications get no response, per spec. Batch requests are
 supported. The bridge forwards `chat/+` and `shim/rpc/remote/+`
@@ -286,13 +325,15 @@ src/            — the Go module
     bridge.go     — bridge to the Remote Server's broker (hook + uplink client)
     gui.go        — GUI listener (random port) + snippet page
     relaytool.go  — serves the Relay Tool at /relay-tool.js (versioned)
+    functions.go  — the function catalog: functions.list RPC + /functions/<id>.js
     server_test.go — broker/RPC/bridge/assets/GUI integration tests
   remoteserver/
     main.go       — the Remote Server: broker + RPC responder + chat user "remote" + operator console
   client/
     snippet.js      — the loader snippet (source): MqttRpc + CommsShim loader
     snippet.min.js  — snippet compiled by Closure Compiler (committed; rebuilt by make)
-    relay-tool.js   — the Relay Tool web-components app (served by localhostServer)
+    relay-tool.js   — the Relay Tool core (menu bar, function list, Configure view, loader)
+    functions/      — loadable function scripts, one per function (echo.js, chat.js)
     mqtt.min.js     — vendored MQTT.js browser build (fallback for the CDN copy)
     demo.html       — demo page: loads the snippet like a console paste
 build/          — build artifacts and executables (generated, gitignored)
@@ -327,6 +368,9 @@ is O(1).
       Remote Server
 - [ ] GUI grows into a full web app (vanilla JS/CSS/HTML + standard
       web components)
+- [x] Loadable Relay Tool functions: the core ships empty;
+      Functions → Configure functions… enables functions from
+      localhostServer's catalog (functions.list) — no redeploy
 - [ ] More Relay Tool functions
 - [ ] Chat users and presence (beyond the two-user test setup)
 - [ ] `wss` for the brokers (mixed-content-safe from https pages)
