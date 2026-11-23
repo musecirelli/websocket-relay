@@ -140,7 +140,16 @@ instead: `remote-server -console /tmp/rs-in`, then
 `printf 'hello\n' > /tmp/rs-in` sends a line.
 
 For the bridge, start localhostServer with
-`-remote-host <Remote Server host>`. In the Relay Tool's Chat
+`-remote-host <Remote Server host>` — or use the make target,
+which takes the Remote Server's IP or domain name (and an
+optional non-default MQTT port):
+
+```sh
+make run-bridge REMOTE_HOST=192.0.2.10              # debug build, via go run
+make run-bridge REMOTE_HOST=192.0.2.10 REMOTE_PORT=1883
+```
+
+In the Relay Tool's Chat
 panel, the Broker field defaults to localhostServer's broker —
 chat then flows over the bridge. The field also accepts the
 Remote Server's broker directly (`ws://<host>:8083`): WebSocket

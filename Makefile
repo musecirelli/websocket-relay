@@ -17,7 +17,7 @@ MIN_SNIPPET := src/client/snippet.min.js
 
 .DEFAULT_GOAL := build
 
-.PHONY: help tools snippet build build-release run run-release run-remote test vet clean
+.PHONY: help tools snippet build build-release run run-bridge run-release run-remote test vet clean
 
 help: ## Show this help (each target is documented by the comment on its own line)
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-16s %s\n", $$1, $$2}'
@@ -55,10 +55,22 @@ build-release: $(MIN_SNIPPET) ## Production build (server + Remote Server): stat
 run: $(MIN_SNIPPET) ## Run for debugging (race detector, nothing kept)
 	cd $(SRC) && $(GO) run -race ./server
 
+# REMOTE_HOST names the Remote Server (IP or domain) the bridge
+# connects to; REMOTE_PORT overrides its MQTT port (default 1883).
+REMOTE_HOST ?=
+REMOTE_PORT ?=
+
+run-bridge: $(MIN_SNIPPET) ## Run localhostServer bridged to a Remote Server: make run-bridge REMOTE_HOST=<host> [REMOTE_PORT=<port>]
+	@if [ -z "$(REMOTE_HOST)" ]; then \
+		echo "REMOTE_HOST is required, e.g.: make run-bridge REMOTE_HOST=192.0.2.10"; \
+		exit 1; \
+	fi
+	cd $(SRC) && $(GO) run -race ./server -remote-host $(REMOTE_HOST) $(if $(REMOTE_PORT),-remote-mqtt-port $(REMOTE_PORT),)
+
 run-release: build-release ## Build the production binary and run it
 	./$(RELEASE)
 
-run-remote: ## Run the Remote Server (Chat relay far end) for debugging
+run-remote: ## Run the Remote Server for debugging
 	cd $(SRC) && $(GO) run ./remoteserver
 
 test: $(MIN_SNIPPET) ## Run the Go test suite
