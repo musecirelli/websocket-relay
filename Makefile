@@ -52,23 +52,29 @@ build-release: $(MIN_SNIPPET) ## Production build (server + Remote Server): stat
 	cd $(SRC) && CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o ../$(RELEASE) ./server
 	cd $(SRC) && CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o ../$(RELEASE_REMOTE) ./remoteserver
 
-run: $(MIN_SNIPPET) ## Run for debugging (race detector, nothing kept)
-	cd $(SRC) && $(GO) run -race ./server
+# HOST sets localhostServer's bind address (the server's -host
+# flag; default 127.0.0.1, loopback only). HOST=0.0.0.0 exposes
+# the broker, asset server, and GUI on all interfaces.
+HOST ?=
+HOST_FLAG := $(if $(HOST),-host $(HOST),)
+
+run: $(MIN_SNIPPET) ## Run for debugging (race detector, nothing kept) [HOST=<addr>]
+	cd $(SRC) && $(GO) run -race ./server $(HOST_FLAG)
 
 # REMOTE_HOST names the Remote Server (IP or domain) the bridge
 # connects to; REMOTE_PORT overrides its MQTT port (default 1883).
 REMOTE_HOST ?=
 REMOTE_PORT ?=
 
-run-bridge: $(MIN_SNIPPET) ## Run localhostServer bridged to a Remote Server: make run-bridge REMOTE_HOST=<host> [REMOTE_PORT=<port>]
+run-bridge: $(MIN_SNIPPET) ## Run localhostServer bridged to a Remote Server: make run-bridge REMOTE_HOST=<host> [REMOTE_PORT=<port>] [HOST=<addr>]
 	@if [ -z "$(REMOTE_HOST)" ]; then \
 		echo "REMOTE_HOST is required, e.g.: make run-bridge REMOTE_HOST=192.0.2.10"; \
 		exit 1; \
 	fi
-	cd $(SRC) && $(GO) run -race ./server -remote-host $(REMOTE_HOST) $(if $(REMOTE_PORT),-remote-mqtt-port $(REMOTE_PORT),)
+	cd $(SRC) && $(GO) run -race ./server -remote-host $(REMOTE_HOST) $(if $(REMOTE_PORT),-remote-mqtt-port $(REMOTE_PORT),) $(HOST_FLAG)
 
-run-release: build-release ## Build the production binary and run it
-	./$(RELEASE)
+run-release: build-release ## Build the production binary and run it [HOST=<addr>]
+	./$(RELEASE) $(HOST_FLAG)
 
 run-remote: ## Run the Remote Server for debugging
 	cd $(SRC) && $(GO) run ./remoteserver

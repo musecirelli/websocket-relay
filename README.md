@@ -149,6 +149,14 @@ make run-bridge REMOTE_HOST=192.0.2.10              # debug build, via go run
 make run-bridge REMOTE_HOST=192.0.2.10 REMOTE_PORT=1883
 ```
 
+localhostServer binds to loopback (127.0.0.1) by default. To
+expose its broker, asset server, and GUI on all interfaces
+instead, pass HOST to any run target:
+
+```sh
+make run-bridge REMOTE_HOST=192.0.2.10 HOST=0.0.0.0
+```
+
 In the Relay Tool's Chat
 panel, the Broker field defaults to localhostServer's broker —
 chat then flows over the bridge. The field also accepts the
