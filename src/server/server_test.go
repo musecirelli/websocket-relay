@@ -158,6 +158,45 @@ func TestAssetMux(t *testing.T) {
 	assert.Contains(t, string(body), "mqtt")
 }
 
+func TestFunctionsListOverMQTT(t *testing.T) {
+	srv := startBroker(t, "127.0.0.1:18886", "")
+	require.NoError(t, mqttx.RespondRPC(srv, "localhost", buildLocalDispatcher()))
+
+	c, msgs := pahoConnect(t, "fn-tester", "tcp://127.0.0.1:18886")
+	subscribe(t, c, "shim/clients/fn-tester/rpc")
+	req, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "method": "functions.list", "id": 3,
+	})
+	tok := c.Publish("shim/rpc/localhost/fn-tester", 0, false, req)
+	require.True(t, tok.WaitTimeout(5*time.Second))
+
+	got := awaitMsg(t, msgs, `"id":3`)
+	assert.Contains(t, got, `"id":"echo"`)
+	assert.Contains(t, got, `"id":"chat"`)
+	assert.Contains(t, got, `"script":"/functions/echo.js"`)
+	assert.Contains(t, got, `"script":"/functions/chat.js"`)
+}
+
+func TestFunctionFilesServed(t *testing.T) {
+	srv := httptest.NewServer(buildMux())
+	t.Cleanup(srv.Close)
+
+	for _, id := range []string{"echo", "chat"} {
+		resp, err := http.Get(srv.URL + "/functions/" + id + ".js")
+		require.NoError(t, err)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode, id)
+		assert.Contains(t, string(body), "registerFunction", id)
+		assert.Contains(t, string(body), `id: '`+id+`'`, id)
+	}
+
+	resp, err := http.Get(srv.URL + "/functions/nope.js")
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func TestGUIServesSnippetWithStamps(t *testing.T) {
 	url, err := startGUI("127.0.0.1", "ws://127.0.0.1:8083", "http://127.0.0.1:8765")
 	require.NoError(t, err)

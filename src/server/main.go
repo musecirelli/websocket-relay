@@ -42,7 +42,7 @@ func main() {
 	if err := broker.AddHook(hook, nil); err != nil {
 		log.Fatalf("bridge hook: %v", err)
 	}
-	dispatcher := jsonrpc.BuildDispatcher()
+	dispatcher := buildLocalDispatcher()
 	if err := mqttx.RespondRPC(broker, "localhost", dispatcher); err != nil {
 		log.Fatalf("rpc responder: %v", err)
 	}
@@ -79,6 +79,15 @@ func main() {
 	log.Fatal(http.ListenAndServe(assetAddr, buildMux()))
 }
 
+// buildLocalDispatcher is localhostServer's command set: the
+// shared echo/ping plus functions.list, which only this server
+// offers (it is the one that serves the function scripts).
+func buildLocalDispatcher() *jsonrpc.Dispatcher {
+	d := jsonrpc.BuildDispatcher()
+	d.Register("functions.list", functionsListHandler)
+	return d
+}
+
 // buildMux wires the HTTP asset routes. Extracted from main so
 // tests can serve the real handler (see server_test.go).
 func buildMux() *http.ServeMux {
@@ -89,6 +98,7 @@ func buildMux() *http.ServeMux {
 	})
 	mux.HandleFunc("/relay-tool.js", relayToolHandler)
 	mux.HandleFunc("/mqtt.min.js", mqttJSHandler)
+	mux.HandleFunc("/functions/", functionFileHandler)
 	return mux
 }
 
