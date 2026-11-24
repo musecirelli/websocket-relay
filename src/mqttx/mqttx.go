@@ -14,6 +14,12 @@
 //   - Script delivery is topics scripts/<username>: subscribe to
 //     your own topic; a script arrives as a script.deliver JSON-RPC
 //     notification (params {from, name, description, script}).
+//   - The Assistant function uses topics assistant/<username>/...:
+//     a snapshot request is an assistant.snapshot JSON-RPC
+//     notification on assistant/<username>/request; the answer is
+//     a begin/dom/console/end message sequence on
+//     assistant/<username>/snapshot, and streamed console entries
+//     are published as bare JSON on assistant/<username>/console.
 package mqttx
 
 import (

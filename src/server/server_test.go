@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	mqtt "github.com/mochi-mqtt/server/v2"
 	paho "github.com/eclipse/paho.mqtt.golang"
+	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -133,6 +133,27 @@ func TestBridgeChatAndRemoteRPC(t *testing.T) {
 	got = awaitMsg(t, localMsgs, "script.deliver")
 	assert.Contains(t, got, `"name":"Puppy"`)
 
+	// Assistant, back-flow: a snapshot request published on the
+	// REMOTE broker must reach a subscriber on the LOCAL one.
+	subscribe(t, localClient, "assistant/steve/request")
+	snapReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "method": "assistant.snapshot",
+		"params": map[string]any{"id": "s1"},
+	})
+	tok = remoteClient.Publish("assistant/steve/request", 0, false, snapReq)
+	require.True(t, tok.WaitTimeout(5*time.Second))
+	got = awaitMsg(t, localMsgs, "assistant.snapshot")
+	assert.Contains(t, got, `"id":"s1"`)
+
+	// Assistant, out-flow: a snapshot message published locally
+	// must arrive at a subscriber on the REMOTE broker.
+	subscribe(t, remoteClient, "assistant/steve/snapshot")
+	tok = localClient.Publish("assistant/steve/snapshot", 0, false,
+		[]byte(`{"id":"s1","kind":"begin","meta":{"url":"http://example.test/"}}`))
+	require.True(t, tok.WaitTimeout(5*time.Second))
+	got = awaitMsg(t, remoteMsgs, `"kind":"begin"`)
+	assert.Contains(t, got, `"url":"http://example.test/"`)
+
 	// RPC to target remote: request published locally must be
 	// answered by the remote responder, response bridged back.
 	subscribe(t, localClient, "shim/clients/local-side/rpc")
@@ -188,16 +209,18 @@ func TestFunctionsListOverMQTT(t *testing.T) {
 	assert.Contains(t, got, `"id":"echo"`)
 	assert.Contains(t, got, `"id":"chat"`)
 	assert.Contains(t, got, `"id":"scripts"`)
+	assert.Contains(t, got, `"id":"assistant"`)
 	assert.Contains(t, got, `"script":"/functions/echo.js"`)
 	assert.Contains(t, got, `"script":"/functions/chat.js"`)
 	assert.Contains(t, got, `"script":"/functions/scripts.js"`)
+	assert.Contains(t, got, `"script":"/functions/assistant.js"`)
 }
 
 func TestFunctionFilesServed(t *testing.T) {
 	srv := httptest.NewServer(buildMux())
 	t.Cleanup(srv.Close)
 
-	for _, id := range []string{"echo", "chat", "scripts"} {
+	for _, id := range []string{"echo", "chat", "scripts", "assistant"} {
 		resp, err := http.Get(srv.URL + "/functions/" + id + ".js")
 		require.NoError(t, err)
 		body, _ := io.ReadAll(resp.Body)

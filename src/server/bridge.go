@@ -5,13 +5,13 @@
 // publishes messages to the Remote Server). Two flows, both QoS 0:
 //
 //   - Out (hook): when a local client publishes on chat/<user>,
-//     scripts/<user> or shim/rpc/remote/<clientId>, the bridge
-//     hook republishes it to the Remote broker over the uplink
-//     client.
+//     scripts/<user>, assistant/<user>/... or
+//     shim/rpc/remote/<clientId>, the bridge hook republishes it
+//     to the Remote broker over the uplink client.
 //   - Back (uplink subscription): the uplink subscribes on the
-//     Remote broker to chat/+, scripts/+ and shim/clients/+/rpc
-//     and injects what arrives into the local broker as inline
-//     publishes.
+//     Remote broker to chat/+, scripts/+, assistant/# and
+//     shim/clients/+/rpc and injects what arrives into the local
+//     broker as inline publishes.
 //
 // Loop-freedom: the hook never forwards publishes that originated
 // from the broker's inline client — which is exactly how the
@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	paho "github.com/eclipse/paho.mqtt.golang"
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/packets"
-	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
 type bridgeHook struct {
@@ -44,6 +44,7 @@ func (h *bridgeHook) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Pack
 		return pk, nil
 	}
 	if isUserTopic(pk.TopicName, "chat") || isUserTopic(pk.TopicName, "scripts") ||
+		strings.HasPrefix(pk.TopicName, "assistant/") ||
 		strings.HasPrefix(pk.TopicName, "shim/rpc/remote/") {
 		h.uplink.Publish(pk.TopicName, 0, false, pk.Payload)
 	}
@@ -81,7 +82,7 @@ func dialUplink(local *mqtt.Server, remoteURL string) (paho.Client, error) {
 	opts := paho.NewClientOptions().AddBroker(remoteURL).SetClientID("localhostserver-bridge")
 	opts.SetAutoReconnect(true)
 	opts.SetOnConnectHandler(func(c paho.Client) {
-		for _, filter := range []string{"chat/+", "scripts/+", "shim/clients/+/rpc"} {
+		for _, filter := range []string{"chat/+", "scripts/+", "assistant/#", "shim/clients/+/rpc"} {
 			if t := c.Subscribe(filter, 0, nil); t.Wait() && t.Error() != nil {
 				log.Printf("[bridge] subscribe %s: %v", filter, t.Error())
 			}
