@@ -4,7 +4,9 @@
 //
 // A snapshot arrives as a message sequence on
 // assistant/<user>/snapshot: begin (page metadata), dom chunks
-// (seq/total), console (the deduplicated buffer), end. The
+// (seq/total), console (the deduplicated buffer), end. A
+// request the user refuses in the panel arrives as a single
+// {kind: "denied"} message instead. The
 // collector reassembles each snapshot and writes it as one JSON
 // document to the -assistant-file path (latest wins), so a
 // reader on this side — Muse — can answer questions about the
@@ -48,11 +50,13 @@ func (a *assembly) complete() bool {
 	return a.began && a.ended && a.gotCons && a.total > 0 && len(a.parts) == a.total
 }
 
-// snapshotInfo describes one completed snapshot.
+// snapshotInfo describes one completed snapshot — or, with
+// Denied set, a request the user refused in the panel.
 type snapshotInfo struct {
-	ID    string
-	URL   string
-	Bytes int
+	ID     string
+	URL    string
+	Bytes  int
+	Denied bool
 }
 
 type assistantCollector struct {
@@ -103,6 +107,12 @@ func (c *assistantCollector) handleSnapshot(payload []byte) (*snapshotInfo, erro
 		c.pending[msg.ID] = a
 	}
 	switch msg.Kind {
+	case "denied":
+		// The user refused this request in the panel: drop any
+		// partial assembly and report the refusal, so it is not
+		// mistaken for a lost message.
+		delete(c.pending, msg.ID)
+		return &snapshotInfo{ID: msg.ID, Denied: true}, nil
 	case "begin":
 		a.meta, a.began = msg.Meta, true
 	case "dom":
