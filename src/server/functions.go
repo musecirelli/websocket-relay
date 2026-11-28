@@ -61,8 +61,8 @@ var functionCatalog = []FunctionMeta{
 	{
 		ID:           "assistant",
 		Name:         "Assistant",
-		Version:      "1.0.0",
-		Description:  "Page-debugging companion: buffers the page's console (deduplicated) and answers snapshot requests with the DOM, metrics, and console buffer.",
+		Version:      "1.1.0",
+		Description:  "Page-debugging companion: buffers the page's console (deduplicated) and, when the user approves a snapshot request in the panel, answers with the DOM, metrics, and console buffer.",
 		Script:       "/functions/assistant.js",
 		Dependencies: []FunctionDep{},
 	},

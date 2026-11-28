@@ -1,5 +1,5 @@
 /**
- * Comms Shim — Relay Tool function: Assistant (v1.0.0)
+ * Comms Shim — Relay Tool function: Assistant (v1.1.0)
  *
  * A loadable function: localhostServer serves this file at
  * /functions/assistant.js and lists it in the functions.list
@@ -14,19 +14,22 @@
  * deduplicated buffer — repeats collapse by fingerprint (level
  * + text + source) into one entry with a count and first/last
  * timestamps, so a broken page spamming the same error cannot
- * flood the buffer. Nothing leaves the page until a snapshot is
- * requested: Muse sends an assistant.snapshot notification to
- * assistant/<username>/request, and the panel answers on
- * assistant/<username>/snapshot with the page's URL and title,
- * screen/viewport metrics, the full DOM (chunked), and the
- * console buffer. A panel toggle instead streams each new
+ * flood the buffer. Nothing leaves the page on its own: Muse
+ * sends an assistant.snapshot notification to
+ * assistant/<username>/request, the panel shows the request,
+ * and only when the user approves it there does the panel
+ * answer on assistant/<username>/snapshot with the page's URL
+ * and title, screen/viewport metrics, the full DOM (chunked),
+ * and the console buffer. Denying answers with a one-line
+ * {kind: "denied"} notice, so the requester can tell a refusal
+ * from a lost message. A panel toggle instead streams each new
  * distinct entry live on assistant/<username>/console. The
  * request channel takes snapshot requests only — no eval, no
  * arbitrary commands. A badge on the page shows the assistant
  * is live; clicking it disconnects.
  */
 (() => {
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const TAG = `relay-assistant-panel-v${VERSION.replaceAll('.', '-')}`;
   const MAX_ENTRIES = 200;   // distinct (deduplicated) entries kept
   const MAX_TEXT = 500;      // chars kept per entry
@@ -60,6 +63,7 @@
       this._hooks = null;
       this._badge = null;
       this._renderTimer = null;
+      this._pendingId = null; // snapshot request awaiting approval
     }
 
     connectedCallback() {
@@ -77,9 +81,13 @@
                                    font-size: 0.85rem; }
           .top input[name="me"] { flex: 0 1 7rem;
                                   font-family: inherit; font-size: inherit; }
-          .connect, .snap { padding: 0.4rem 0.6rem; font: inherit;
+          .connect, .req button { padding: 0.4rem 0.6rem; font: inherit;
                             cursor: pointer; }
-          .snap:disabled { cursor: default; opacity: 0.5; }
+          .req { display: flex; align-items: center; gap: 0.4rem;
+                 border: 1px solid #e3a008; border-radius: 6px;
+                 padding: 0.4rem 0.5rem; font-size: 0.85rem; }
+          .req[hidden] { display: none; }
+          .req .req-text { flex: 1; }
           .light { width: 11px; height: 11px; border-radius: 50%; flex: none;
                    background: #d64545;
                    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset; }
@@ -110,9 +118,13 @@
             <span class="light" role="status" aria-label="Not connected"></span>
           </form>
           <div class="bar">
-            <button class="snap" type="button" disabled>Send snapshot</button>
             <label><input type="checkbox" name="stream"> Stream console</label>
             <span class="summary">0 distinct · 0 total</span>
+          </div>
+          <div class="req" hidden>
+            <span class="req-text">Snapshot requested</span>
+            <button class="approve" type="button">Approve</button>
+            <button class="deny" type="button">Deny</button>
           </div>
           <div class="log" part="log"></div>
         </div>`;
@@ -121,7 +133,8 @@
       this._broker = this.shadowRoot.querySelector('input[name="broker"]');
       this._me = this.shadowRoot.querySelector('input[name="me"]');
       this._light = this.shadowRoot.querySelector('.light');
-      this._snapBtn = this.shadowRoot.querySelector('.snap');
+      this._reqEl = this.shadowRoot.querySelector('.req');
+      this._reqText = this.shadowRoot.querySelector('.req-text');
       this._streamBox = this.shadowRoot.querySelector('input[name="stream"]');
       this._summary = this.shadowRoot.querySelector('.summary');
       this._logEl = this.shadowRoot.querySelector('.log');
@@ -136,7 +149,10 @@
           this._subscribeAs(this._me.value.trim());
         }
       });
-      this._snapBtn.addEventListener('click', () => this._sendSnapshot(''));
+      this.shadowRoot.querySelector('.approve').addEventListener(
+        'click', () => this._approveSnapshot());
+      this.shadowRoot.querySelector('.deny').addEventListener(
+        'click', () => this._denySnapshot());
       this._streamBox.addEventListener('change', () => {
         // Turning streaming on sends the current buffer once, so
         // the other side starts from the same picture.
@@ -159,6 +175,7 @@
     _teardown() {
       this._unsubscribe.forEach((u) => u());
       this._unsubscribe = [];
+      this._clearRequest();
       if (this._rpc) {
         this._rpc.close();
         this._rpc = null;
@@ -175,7 +192,6 @@
       const btn = this.shadowRoot.querySelector('.connect');
       if (btn) btn.textContent =
         state === 'connected' || state === 'connecting' ? 'Disconnect' : 'Connect';
-      if (this._snapBtn) this._snapBtn.disabled = state !== 'connected';
     }
 
     async _toggleConnect() {
@@ -196,7 +212,7 @@
         if (this._rpc === rpc) this._setState(s);
       }));
       this._unsubscribe.push(rpc.onNotification('assistant.snapshot', (p) => {
-        this._sendSnapshot(p?.id || '');
+        this._requestSnapshot(p);
       }));
       try {
         await rpc.connect();
@@ -330,6 +346,39 @@
     }
 
     // --- snapshots ---------------------------------------------------
+
+    // A snapshot request arrived. Nothing is sent until the
+    // user approves the request here in the panel; a newer
+    // request replaces one still pending.
+    _requestSnapshot(p) {
+      this._pendingId = p?.id || 'snap-' + Date.now().toString(36);
+      const from = typeof p?.from === 'string' && p.from
+        ? ` by ${p.from}` : '';
+      this._reqText.textContent =
+        `Snapshot requested${from} — send this page's DOM and console?`;
+      this._reqEl.hidden = false;
+    }
+
+    _approveSnapshot() {
+      const id = this._pendingId;
+      this._clearRequest();
+      if (id) this._sendSnapshot(id);
+    }
+
+    _denySnapshot() {
+      const id = this._pendingId;
+      this._clearRequest();
+      const me = this._me.value.trim();
+      if (id && this._rpc && me) {
+        this._rpc.publishTopic(`assistant/${me}/snapshot`,
+          { id, kind: 'denied' });
+      }
+    }
+
+    _clearRequest() {
+      this._pendingId = null;
+      if (this._reqEl) this._reqEl.hidden = true;
+    }
 
     _sendSnapshot(id) {
       if (!this._rpc || this._state !== 'connected') return;

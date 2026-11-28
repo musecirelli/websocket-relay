@@ -16,10 +16,13 @@
 //     notification (params {from, name, description, script}).
 //   - The Assistant function uses topics assistant/<username>/...:
 //     a snapshot request is an assistant.snapshot JSON-RPC
-//     notification on assistant/<username>/request; the answer is
-//     a begin/dom/console/end message sequence on
-//     assistant/<username>/snapshot, and streamed console entries
-//     are published as bare JSON on assistant/<username>/console.
+//     notification on assistant/<username>/request; the panel
+//     sends the answer — a begin/dom/console/end message
+//     sequence on assistant/<username>/snapshot — only after
+//     the user approves the request in the panel, or a single
+//     {kind: "denied"} message if they refuse. Streamed console
+//     entries are published as bare JSON on
+//     assistant/<username>/console.
 package mqttx
 
 import (
