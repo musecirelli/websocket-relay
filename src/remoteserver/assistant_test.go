@@ -41,6 +41,21 @@ func TestCollectorReassemblesSnapshot(t *testing.T) {
 	assert.Contains(t, string(data), `"text":"boom"`)
 }
 
+func TestCollectorDenied(t *testing.T) {
+	dir := t.TempDir()
+	c := newAssistantCollector(
+		filepath.Join(dir, "snap.json"), filepath.Join(dir, "console.log"))
+
+	info, err := c.handleSnapshot([]byte(`{"id":"s9","kind":"denied"}`))
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.True(t, info.Denied)
+	assert.Equal(t, "s9", info.ID)
+
+	_, err = os.Stat(filepath.Join(dir, "snap.json"))
+	assert.True(t, os.IsNotExist(err))
+}
+
 func TestCollectorConsoleAppend(t *testing.T) {
 	dir := t.TempDir()
 	c := newAssistantCollector(

@@ -107,7 +107,10 @@ func main() {
 				log.Printf("[assistant] %v", err)
 				return
 			}
-			if info != nil {
+			if info != nil && info.Denied {
+				log.Printf("[assistant] snapshot %s from %s: denied in the panel",
+					info.ID, userFromTopic(pk.TopicName))
+			} else if info != nil {
 				log.Printf("[assistant] snapshot %s from %s: %s (%d bytes)",
 					info.ID, userFromTopic(pk.TopicName), info.URL, info.Bytes)
 			}

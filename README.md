@@ -290,15 +290,18 @@ Functions (served at `GET /functions/<id>.js`, cataloged in
   fingerprint (level + text + source) with repeat counts, so a
   broken page cannot flood it. Nothing leaves the page until a
   snapshot is requested (`assistant.snapshot` on
-  `assistant/<username>/request`): the panel answers on
+  `assistant/<username>/request`) **and the user approves the
+  request in the panel**: the panel then answers on
   `assistant/<username>/snapshot` with the page URL and title,
   screen/viewport metrics, the full DOM (chunked), and the
   console buffer. A toggle streams new distinct entries live on
   `assistant/<username>/console` instead. The Remote Server
   collects snapshots to a JSON file (`-assistant-file`) and
   streamed entries to a log (`-assistant-log`), so the operator
-  side can answer questions about the page. The request channel
-  takes snapshot requests only — no eval.
+  side can answer questions about the page. Denying a request
+  sends a one-line `denied` notice instead, so a refusal is not
+  mistaken for a lost message. The request channel takes
+  snapshot requests only — no eval.
 
 Adding a function = one script in `src/client/functions/` plus
 one entry in the server catalog — no snippet or core redeploy,
@@ -324,7 +327,7 @@ Topics:
 | `chat/<username>` | anyone → that user | `chat.message` notification |
 | `scripts/<username>` | anyone → that user | `script.deliver` notification |
 | `assistant/<username>/request` | operator → Assistant | `assistant.snapshot` notification |
-| `assistant/<username>/snapshot` | Assistant → operator | snapshot sequence: `begin` (metadata), `dom` chunks, `console`, `end` |
+| `assistant/<username>/snapshot` | Assistant → operator | snapshot sequence: `begin` (metadata), `dom` chunks, `console`, `end` — or a `denied` notice |
 | `assistant/<username>/console` | Assistant → operator | one streamed console entry (JSON) |
 
 Request:
